@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Running it — Handwave</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;800&family=IBM+Plex+Sans:wght@300;400;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="bar">
+  <div class="bar-inner">
+    <a class="wordmark" href="index.html">Handwave</a>
+    <nav><a href="index.html">Wave to begin</a><a href="tracking.html">How it reads a hand</a><a href="tuning.html">Tuning</a><a href="running.html" aria-current='page'>Running it</a></nav>
+  </div>
+  <div id="progress"></div>
+</header>
+<main>
+<section>
+  <div class="eyebrow">04 — Running it</div>
+  <h1>Serve it, don't open it.</h1>
+  <p class="lede">Browsers only grant camera access on secure origins. Double-clicking the file gives you a <span class="mono">file://</span> page, and the camera request fails there every time.</p>
+</section>
+
+<section>
+  <h2>Start a local server.</h2>
+  <p>From the folder holding <span class="mono">index.html</span>, run one of these, then open <span class="mono">localhost:8000</span>.</p>
+  <pre>python3 -m http.server 8000
+# or
+npx serve .</pre>
+  <p><span class="mono">localhost</span> counts as a secure origin, so the camera prompt appears normally. On any other machine you need real HTTPS.</p>
+</section>
+
+<section>
+  <h2>File layout.</h2>
+  <pre>handwave/
+  index.html        01  wave to begin
+  tracking.html     02  how it reads a hand
+  tuning.html       03  tuning
+  running.html      04  running it
+  assets/
+    style.css       shared tokens and layout
+    gesture.js      camera, model, gestures, HUD</pre>
+  <p>The HUD is built by the script, not written into the markup, so a new page needs three things: the stylesheet, the script tag, and its filename added to the <span class="mono">PAGES</span> array at the top of the module. Order in that array is the order swipes move through.</p>
+</section>
+
+<section>
+  <h2>Camera across page loads.</h2>
+  <p>Each page is a real navigation, so the video stream and the model are torn down and rebuilt every time. The permission itself is remembered per origin, which is why only the first page asks. A flag in <span class="mono">sessionStorage</span> tells later pages to start the camera without waiting for a click, and a backwards swipe scrolls you to the bottom of the page you land on so you continue where you were reading.</p>
+  <p>The model file is fetched from a CDN and then cached, so the first load is the slow one. Serving it yourself removes the network dependency entirely, if you need this to work offline.</p>
+</section>
+
+<section>
+  <h2>When it will not track.</h2>
+  <div class="grid">
+    <div class="card"><h3>Backlight</h3><p>A window behind you turns your hand into a silhouette. Face the light instead.</p></div>
+    <div class="card"><h3>Too close</h3><p>Fingertips out of frame means missing landmarks. Half a metre back is about right.</p></div>
+    <div class="card"><h3>Sideways hand</h3><p>Extension is measured vertically. Keep the palm upright and facing the lens.</p></div>
+    <div class="card"><h3>Low frame rate</h3><p>Switch the delegate from GPU to CPU if the GPU path fails silently on your machine.</p></div>
+  </div>
+</section>
+
+<section>
+  <h2>Where to take it next.</h2>
+  <p>Two hands for zoom, using the distance between wrists. A dwell-to-click, where a pinch held still over a link for a beat follows it. Or the honest ergonomic answer: gesture control is wonderful for a talk and tiring for an afternoon, so anything you build this way should still work perfectly well with a keyboard.</p>
+</section>
+<a class="next" href="index.html">Back to the start &nbsp;↺</a>
+</main>
+<script type="module" src="assets/gesture.js"></script>
+</body>
+</html>

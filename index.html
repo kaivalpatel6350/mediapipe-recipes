@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>MediaPipe Recipes — your body is the controller</title>
+<meta name="description" content="A collection of browser-based MediaPipe demos: hand-gesture navigation, full-body arcade games, dance-triggered hero suits. Everything runs on-device." />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --void:#07061A; --deep:#12103A; --panel:rgba(18,16,58,.94); --line:#332C7A;
+  --ink:#F2EFFF; --dim:#9F98D4;
+  --cyan:#31E7FF; --magenta:#FF48A6; --gold:#FFC93C; --lime:#63FFB0; --grape:#B98CFF; --coral:#FF7A4D;
+  --display:'Fredoka',system-ui,sans-serif; --ui:'Space Grotesk',system-ui,sans-serif;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  margin:0;min-height:100%;background:
+    radial-gradient(1100px 600px at 12% -10%, rgba(49,231,255,.13), transparent 60%),
+    radial-gradient(900px 620px at 88% 8%, rgba(255,72,166,.13), transparent 62%),
+    radial-gradient(800px 700px at 50% 105%, rgba(185,140,255,.10), transparent 60%),
+    var(--void);
+  color:var(--ink);font-family:var(--ui);-webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1080px;margin:0 auto;padding:clamp(28px,6vw,72px) clamp(18px,4vw,28px) 80px}
+
+header{margin-bottom:clamp(30px,5vw,54px)}
+.kicker{font-size:11px;letter-spacing:.26em;text-transform:uppercase;color:var(--cyan)}
+h1{font-family:var(--display);font-weight:700;font-size:clamp(38px,7.4vw,74px);line-height:.94;margin:.16em 0 .18em;letter-spacing:-.01em}
+h1 em{font-style:normal;color:var(--gold)}
+.lede{color:#D6D0FF;line-height:1.65;font-size:clamp(15px,1.9vw,18px);max-width:66ch;margin:0 0 20px}
+.badges{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:22px}
+.pill{font-size:12.5px;border-radius:999px;padding:7px 15px;display:inline-block;border:1px solid var(--line);color:var(--dim)}
+.pill.privacy{color:var(--lime);border-color:rgba(99,255,176,.35)}
+.pill.repo{color:var(--ink);text-decoration:none;transition:border-color .15s ease,color .15s ease}
+.pill.repo:hover{border-color:var(--cyan);color:var(--cyan)}
+
+h2{font-family:var(--display);font-weight:600;font-size:clamp(21px,3.2vw,30px);margin:0 0 6px}
+.sub{color:var(--dim);font-size:14px;margin:0 0 18px}
+section{margin-top:clamp(38px,6vw,64px)}
+
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(272px,1fr));gap:16px}
+.card{
+  display:flex;flex-direction:column;text-decoration:none;color:var(--ink);
+  background:linear-gradient(180deg,#191552,#161148);
+  border:2px solid var(--line);border-radius:22px;padding:20px;
+  transition:transform .16s ease,border-color .16s ease,box-shadow .16s ease;
+}
+.card:hover{transform:translateY(-5px);border-color:var(--acc,var(--cyan));box-shadow:0 18px 48px rgba(0,0,0,.45)}
+.card:focus-visible{outline:3px solid var(--cyan);outline-offset:3px}
+.card .em{font-size:32px;line-height:1}
+.card h3{font-family:var(--display);font-weight:600;font-size:21px;margin:12px 0 6px;color:var(--acc,var(--cyan))}
+.card p{color:#CFC8F5;line-height:1.55;font-size:14px;margin:0}
+.meta{display:flex;gap:7px;flex-wrap:wrap;margin-top:14px}
+.tag{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);
+  border:1px solid var(--line);border-radius:999px;padding:4px 9px}
+
+.soon{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
+.idea{background:rgba(18,16,58,.6);border:1px dashed var(--line);border-radius:18px;padding:16px 18px}
+.idea h4{font-family:var(--display);font-weight:600;font-size:16px;margin:0 0 6px;color:var(--grape)}
+.idea p{color:var(--dim);font-size:13.5px;line-height:1.55;margin:0}
+
+.note{margin-top:26px;background:rgba(18,16,58,.6);border:1px solid var(--line);border-radius:18px;padding:18px 20px}
+.note h3{font-family:var(--display);font-weight:600;font-size:17px;margin:0 0 8px;color:var(--gold)}
+.note p{color:#CFC8F5;font-size:14px;line-height:1.6;margin:0 0 8px}
+.note p:last-child{margin-bottom:0}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;
+  background:#221B66;border-radius:6px;padding:2px 7px;color:var(--lime)}
+
+footer{margin-top:clamp(44px,7vw,80px);padding-top:22px;border-top:1px solid var(--line);
+  color:var(--dim);font-size:13px;display:flex;gap:14px;flex-wrap:wrap;justify-content:space-between}
+footer a{color:var(--dim)}
+footer a:hover{color:var(--cyan)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}html{scroll-behavior:auto}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="kicker">MediaPipe · in the browser · on-device</div>
+    <h1>Your body is the <em>controller</em>.</h1>
+    <p class="lede">A small collection of experiments built on MediaPipe Tasks — hands, pose, face — running entirely client-side. No install, no upload, no server. Open one, allow the camera, and move.</p>
+    <div class="badges">
+      <span class="pill privacy">🔒 Every frame stays on your device</span>
+      <span class="pill">Webcam recommended · keyboard fallbacks included</span>
+      <a class="pill repo" href="https://github.com/kaivalpatel6350/mediapipe-recipes">Source on GitHub ↗</a>
+    </div>
+  </header>
+
+  <section>
+    <h2>Playable now</h2>
+    <p class="sub">Each one reads the body a different way.</p>
+    <div class="grid">
+
+      <a class="card" style="--acc:var(--gold)" href="./arcade/arcade.html">
+        <div class="em">🕹️</div>
+        <h3>Dojo Arcade</h3>
+        <p>Seven ways to be the controller in one shell — silhouette matching, stillness, air-drawn glyphs, rhythm, physics, face, joint angles.</p>
+        <div class="meta"><span class="tag">Pose</span><span class="tag">Hands</span><span class="tag">Face</span><span class="tag">Collection</span></div>
+      </a>
+
+      <a class="card" style="--acc:var(--magenta)" href="./kid-game/index.html">
+        <div class="em">🚀</div>
+        <h3>Space Dojo</h3>
+        <p>Punch the meteors, kick the probes, squat under the lasers. Full-body play for kids, with a keyboard puppet mode when there's no room to move.</p>
+        <div class="meta"><span class="tag">Pose</span><span class="tag">Full body</span><span class="tag">Kids</span></div>
+      </a>
+
+      <a class="card" style="--acc:var(--coral)" href="./hero-suits/hero-suit.html">
+        <div class="em">🦸</div>
+        <h3>Hero Suit</h3>
+        <p>Stand back until your whole body fits the frame, pick a suit, then dance. The costume tracks your skeleton in real time.</p>
+        <div class="meta"><span class="tag">Pose</span><span class="tag">Costume</span><span class="tag">Dance</span></div>
+      </a>
+
+      <a class="card" style="--acc:var(--cyan)" href="./handwave/index.html">
+        <div class="em">👋</div>
+        <h3>Handwave</h3>
+        <p>A multi-page site you navigate with one hand. Pinch and drag to scroll, open palm and flick to change pages — plus write-ups on tracking and tuning.</p>
+        <div class="meta"><span class="tag">Hands</span><span class="tag">Navigation</span><span class="tag">Write-up</span></div>
+      </a>
+
+      <a class="card" style="--acc:var(--lime)" href="./demo1/gesture-deck.html">
+        <div class="em">🗂️</div>
+        <h3>Gesture Deck</h3>
+        <p>The original single-file prototype: swipe through a deck of slides with an open palm, drag with a pinch, fall back to arrow keys any time.</p>
+        <div class="meta"><span class="tag">Hands</span><span class="tag">Prototype</span><span class="tag">Single file</span></div>
+      </a>
+
+    </div>
+  </section>
+
+  <section>
+    <h2>On the bench</h2>
+    <p class="sub">Sketched in <code>ideas.txt</code>, not built yet.</p>
+    <div class="soon">
+      <div class="idea"><h4>Hole in the Wall</h4><p>Match a flying cutout with your silhouette. Scored on pixel overlap from the segmentation mask, not landmarks.</p></div>
+      <div class="idea"><h4>Statue / Red Light Green Light</h4><p>Inverted incentive — score for stillness under pressure. Sub-pixel jitter detection catches you flinching.</p></div>
+      <div class="idea"><h4>Air Glyphs</h4><p>Trace shapes with your index finger; a $1 unistroke recognizer turns them into spells.</p></div>
+      <div class="idea"><h4>Body Drums</h4><p>Hand and foot velocity into Web Audio. Zones in space are drums; strike velocity sets volume.</p></div>
+      <div class="idea"><h4>Ragdoll Physics Playground</h4><p>Your limbs become Matter.js colliders. Juggle five balls, herd them into a bucket.</p></div>
+      <div class="idea"><h4>Face Controller</h4><p>Blendshapes as buttons: eyebrow raise jumps, mouth open shoots, head tilt steers. Playable sitting down.</p></div>
+      <div class="idea"><h4>Yoga Hold / Angle Matcher</h4><p>Score joint angles against a target pose and hold for ten seconds. The calm opposite of an arcade.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Notes</h2>
+    <div class="note">
+      <h3>If the camera doesn't start</h3>
+      <p>Cameras need a secure context. These pages work over <code>https://</code> (as here) or <code>localhost</code>, but a plain <code>file://</code> double-click is blocked by the browser — every demo detects that and offers keyboard mode instead.</p>
+      <p>To run locally: clone the repo, then <code>python3 -m http.server 8000</code> and open <code>localhost:8000</code>. First load of each demo pulls the MediaPipe model from a CDN, so give it a moment.</p>
+      <p>Best results with good front lighting, a plain-ish background, and — for the full-body demos — a couple of metres between you and the lens.</p>
+    </div>
+  </section>
+
+  <footer>
+    <span>Built with MediaPipe Tasks for Web. No build step, no dependencies to install.</span>
+    <a href="https://github.com/kaivalpatel6350/mediapipe-recipes">kaivalpatel6350/mediapipe-recipes</a>
+  </footer>
+
+</div>
+</body>
+</html>

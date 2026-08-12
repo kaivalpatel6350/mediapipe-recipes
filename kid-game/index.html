@@ -1,0 +1,1084 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Space Dojo — move your whole body</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --void:#0B0724; --deep:#160C3D; --panel:rgba(26,15,70,.92); --line:#3B2A7A;
+  --ink:#F3EEFF; --dim:#A99CD8;
+  --cyan:#2BE8FF; --magenta:#FF3D9A; --gold:#FFD23F; --lime:#5BFF9E;
+  --display:'Fredoka',system-ui,sans-serif;
+  --ui:'Space Grotesk',system-ui,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--void);color:var(--ink);
+  font-family:var(--ui);-webkit-tap-highlight-color:transparent}
+canvas#stage{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none}
+video#cam{position:fixed;width:2px;height:2px;opacity:0;pointer-events:none;top:0;left:0}
+
+/* ---------- overlay screens ---------- */
+#screens{position:fixed;inset:0;display:grid;place-items:center;padding:24px;pointer-events:none;z-index:10}
+.panel{pointer-events:auto;width:min(680px,94vw);background:var(--panel);border:2px solid var(--line);
+  border-radius:28px;padding:34px 34px 30px;text-align:center;backdrop-filter:blur(14px);
+  box-shadow:0 30px 80px rgba(0,0,0,.55)}
+.panel.hidden,#screens.hidden{display:none}
+.kicker{font-family:var(--ui);font-size:12px;letter-spacing:.24em;text-transform:uppercase;color:var(--cyan)}
+h1{font-family:var(--display);font-weight:700;font-size:clamp(38px,8vw,74px);line-height:.9;margin:.18em 0 .1em;
+  letter-spacing:-.01em;text-shadow:0 0 26px rgba(43,232,255,.35)}
+h1 em{font-style:normal;color:var(--gold)}
+h2{font-family:var(--display);font-weight:600;font-size:clamp(24px,4.6vw,40px);margin:0 0 12px}
+p{color:#D9D0FF;line-height:1.6;margin:10px auto;max-width:46ch;font-size:16px}
+.privacy{font-size:13px;color:var(--lime);border:1px solid rgba(91,255,158,.35);border-radius:999px;
+  padding:8px 16px;display:inline-block;margin-top:6px}
+button{font-family:var(--display);font-weight:600;font-size:19px;border:0;border-radius:999px;padding:16px 30px;
+  cursor:pointer;color:#150A33;background:var(--gold);transition:transform .12s ease, filter .12s ease}
+button:hover{transform:translateY(-2px);filter:brightness(1.08)}
+button:active{transform:translateY(1px)}
+button.ghost{background:transparent;color:var(--ink);border:2px solid var(--line)}
+button.ghost:hover{border-color:var(--cyan)}
+button:focus-visible{outline:3px solid var(--cyan);outline-offset:3px}
+.row{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:22px}
+.toggles{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:18px}
+.chip{font-size:14px;color:var(--dim);border:2px solid var(--line);border-radius:999px;padding:9px 16px;
+  cursor:pointer;user-select:none;background:transparent}
+.chip[aria-pressed="true"]{color:#150A33;background:var(--lime);border-color:var(--lime);font-weight:700}
+
+/* framing checklist */
+.checks{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin:22px 0 6px}
+.check{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--dim);
+  border:2px solid var(--line);border-radius:999px;padding:8px 15px}
+.check b{width:9px;height:9px;border-radius:50%;background:#4A3A8C}
+.check.on{color:var(--lime);border-color:rgba(91,255,158,.5)}
+.check.on b{background:var(--lime);box-shadow:0 0 12px var(--lime)}
+.meter{height:10px;border-radius:999px;background:#2A1A63;overflow:hidden;margin:18px auto 0;max-width:420px}
+.meter i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--cyan),var(--lime));transition:width .12s linear}
+.hint{font-size:14px;color:var(--dim)}
+.stats{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin:18px 0 4px}
+.stat{background:#22135C;border-radius:18px;padding:14px 20px;min-width:120px}
+.stat span{display:block;font-family:var(--display);font-size:30px;color:var(--gold)}
+.stat small{font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim)}
+.keys{font-family:var(--ui);font-size:13px;color:var(--dim);margin-top:16px;line-height:2}
+.keys kbd{border:1px solid var(--line);border-radius:6px;padding:2px 8px;color:var(--ink);font-family:var(--ui)}
+
+/* in-game control chips */
+#hudchips{position:fixed;top:14px;right:14px;display:flex;gap:8px;z-index:12}
+#hudchips.hidden{display:none}
+#hudchips .chip{background:rgba(20,11,55,.8);font-size:13px;padding:8px 14px}
+@media (prefers-reduced-motion:reduce){button{transition:none}}
+</style>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<video id="cam" playsinline muted></video>
+
+<div id="hudchips" class="hidden">
+  <button class="chip" id="chipSeated" aria-pressed="false">🪑 Seated</button>
+  <button class="chip" id="chipQuit">↺ Restart</button>
+</div>
+
+<div id="screens">
+
+  <div class="panel" id="pStart">
+    <div class="kicker">Full-body arcade</div>
+    <h1>SPACE <em>DOJO</em></h1>
+    <p>Punch the meteors. Kick the probes. Squat under the lasers. Your whole body is the controller.</p>
+    <div class="privacy">🔒 Your camera never leaves this device — all tracking runs in your browser.</div>
+    <div class="row">
+      <button id="btnCamera">Turn on camera</button>
+      <button class="ghost" id="btnDemo">Play with keyboard</button>
+    </div>
+    <div class="toggles">
+      <button class="chip" id="chipSeatedStart" aria-pressed="false">🪑 Seated mode</button>
+    </div>
+    <p class="hint" id="fileHint" style="display:none">Opened as a file? The camera needs a local server — keyboard mode works right now.</p>
+  </div>
+
+  <div class="panel hidden" id="pError">
+    <div class="kicker">Camera</div>
+    <h2 id="errTitle">Hmm, no camera yet</h2>
+    <p id="errBody">Something got in the way.</p>
+    <div class="row">
+      <button id="btnRetry">Try again</button>
+      <button class="ghost" id="btnErrDemo">Play with keyboard</button>
+    </div>
+  </div>
+
+  <div class="panel hidden" id="pFraming">
+    <div class="kicker">Step 1 of 2</div>
+    <h2>Step back until I can see all of you</h2>
+    <p>Head, hands, hips and feet — all in the picture. Hold it for two seconds.</p>
+    <div class="checks">
+      <div class="check" id="ckNose"><b></b>Head</div>
+      <div class="check" id="ckWrists"><b></b>Hands</div>
+      <div class="check" id="ckHips"><b></b>Hips</div>
+      <div class="check" id="ckAnkles"><b></b>Feet</div>
+    </div>
+    <div class="meter"><i id="framingBar"></i></div>
+  </div>
+
+  <div class="panel hidden" id="pCalib">
+    <div class="kicker">Step 2 of 2</div>
+    <h2>Make a big <em>T</em>!</h2>
+    <p id="calibHint">Arms straight out to the sides, stand tall. Hold for three seconds.</p>
+    <div class="meter"><i id="calibBar"></i></div>
+  </div>
+
+  <div class="panel hidden" id="pRest">
+    <div class="kicker" id="restKicker">Round complete</div>
+    <h2 id="restTitle">Nice moves!</h2>
+    <div class="stats" id="restStats"></div>
+    <p id="restPraise">You dodged 12 lasers!</p>
+    <p class="hint">🫨 Shake it out — next round in <b id="restCount">10</b></p>
+    <div class="row"><button id="btnSkipRest">Go now</button></div>
+  </div>
+
+</div>
+
+<script type="module">
+/* ============================================================
+   SPACE DOJO — full-body webcam exergame
+   Single file. MediaPipe Tasks Vision PoseLandmarker.
+   ============================================================ */
+
+/* ---------- 1. TUNING CONSTANTS (start here) ---------- */
+const CFG = {
+  INFER_FPS:            30,     // pose inference rate, decoupled from render
+  SMOOTH_FRAMES:        3,      // moving-average window on landmarks
+  ACTION_COOLDOWN_MS:   200,    // per-action-type lockout
+  MIN_VISIBILITY:       0.5,    // landmark must be this visible to drive an action
+  FRAMING_VISIBILITY:   0.6,    // stricter bar for the framing check
+  FRAMING_HOLD_MS:      2000,
+  TPOSE_HOLD_MS:        3000,
+  LOST_PLAYER_MS:       3000,   // out of frame this long -> recalibrate
+
+  // thresholds in SHOULDER-WIDTHS, never pixels
+  PUNCH_SPEED_SW:       1.6,    // wrist speed, shoulder-widths per second
+  KICK_RISE_SW:         0.40,   // ankle above its resting Y
+  DUCK_DROP_SW:         0.80,   // nose below standing nose Y
+  DODGE_SHIFT_SW:       0.75,   // hip midpoint from centre
+  JUMP_RISE_SW:         0.30,   // both ankles above resting Y
+  HITBOX_SW:            0.90,   // target radius
+  TARGET_OFFSET_SW:     1.55,   // how far out from body centre targets sit
+
+  // seated mode: arm-only equivalents
+  SEATED_KICK_DROP_SW:  0.25,   // wrist below hip line = "kick"
+  SEATED_DUCK_SCALE:    0.40,   // gentler head dip counts as a duck
+  SEATED_JUMP_RISE_SW:  0.35,   // both wrists above shoulder line = "jump"
+
+  TRAVEL_MS:            2100,   // spawn -> deadline at objectSpeed 1.0
+  ACTIVE_FROM:          0.55,   // fraction of travel when a target becomes hittable
+  ENERGY_GAIN:          1.5,
+  ENERGY_DECAY:         0.28,
+  MISS_FRACTION:        0.5,    // miss costs this share of the target's points
+  SHAKE_MS:             420,
+  REST_SEC:             10,
+};
+
+const LM = { NOSE:0, L_SHOULDER:11, R_SHOULDER:12, L_WRIST:15, R_WRIST:16,
+             L_HIP:23, R_HIP:24, L_ANKLE:27, R_ANKLE:28 };
+
+const ACTION_TYPES = ['punch_left','punch_right','kick_left','kick_right',
+                      'wall_duck','dodge_left','dodge_right','jump'];
+
+/* ---------- 2. ROUND DATA (authorable without touching engine code) ---------- */
+const ROUNDS = [
+  {
+    round: 1,
+    theme: "Laser Space Dojo",
+    description: "Punch the meteors, kick the probes, SQUAT under the lasers!",
+    workoutFocus: "Cardio & Legs",
+    durationSec: 60,
+    difficulty: { spawnIntervalMs: 1800, objectSpeed: 1.0 },
+    spawnRoutine: [
+      { type: "punch_left",  label: "💥 METEOR",     color: "#FF3D9A", points: 10 },
+      { type: "kick_right",  label: "🤖 PROBE",      color: "#2BE8FF", points: 15 },
+      { type: "wall_duck",   label: "⚡ LASER WALL", color: "#FFD23F", points: 20 },
+      { type: "punch_right", label: "💥 METEOR",     color: "#FF3D9A", points: 10 },
+      { type: "kick_left",   label: "🤖 PROBE",      color: "#2BE8FF", points: 15 }
+    ]
+  },
+  {
+    round: 2,
+    theme: "Temple Sprint",
+    description: "Lean away from the pillars, duck the vines, JUMP the roots!",
+    workoutFocus: "Agility & Core",
+    durationSec: 60,
+    difficulty: { spawnIntervalMs: 1500, objectSpeed: 1.2 },
+    spawnRoutine: [
+      { type: "dodge_left",  label: "🗿 PILLAR",  color: "#FF8A3D", points: 15 },
+      { type: "wall_duck",   label: "🌿 VINES",   color: "#5BFF9E", points: 20 },
+      { type: "dodge_right", label: "🗿 PILLAR",  color: "#FF8A3D", points: 15 },
+      { type: "jump",        label: "🪵 ROOTS",   color: "#C08BFF", points: 25 },
+      { type: "wall_duck",   label: "🌿 VINES",   color: "#5BFF9E", points: 20 }
+    ]
+  },
+  {
+    round: 3,
+    theme: "Boss: Meteor Mech",
+    description: "Everything at once — punch, kick, duck, lean and JUMP!",
+    workoutFocus: "Full Body",
+    durationSec: 75,
+    difficulty: { spawnIntervalMs: 1250, objectSpeed: 1.35 },
+    spawnRoutine: [
+      { type: "punch_right", label: "🔩 BOLT",     color: "#FF3D9A", points: 15 },
+      { type: "wall_duck",   label: "⚡ MEGA BEAM", color: "#FFD23F", points: 25 },
+      { type: "kick_left",   label: "🛰️ DRONE",    color: "#2BE8FF", points: 20 },
+      { type: "dodge_right", label: "🔨 ARM SWING",color: "#FF8A3D", points: 20 },
+      { type: "jump",        label: "🌊 SHOCKWAVE",color: "#C08BFF", points: 30 },
+      { type: "punch_left",  label: "🔩 BOLT",     color: "#FF3D9A", points: 15 },
+      { type: "kick_right",  label: "🛰️ DRONE",    color: "#2BE8FF", points: 20 },
+      { type: "dodge_left",  label: "🔨 ARM SWING",color: "#FF8A3D", points: 20 }
+    ]
+  }
+];
+
+const FALLBACK_ROUND = {
+  round: 1, theme: "Warm Up", description: "Punch the targets!", workoutFocus: "Cardio",
+  durationSec: 45, difficulty: { spawnIntervalMs: 1800, objectSpeed: 1 },
+  spawnRoutine: [{ type:"punch_left", label:"💥 TARGET", color:"#FF3D9A", points:10 },
+                 { type:"punch_right", label:"💥 TARGET", color:"#FF3D9A", points:10 }]
+};
+
+/* ---------- 3. SCHEMA VALIDATION ---------- */
+function validateRounds(list){
+  const out = [];
+  if (!Array.isArray(list)){ console.warn('[rounds] not an array — using fallback'); return [FALLBACK_ROUND]; }
+
+  list.forEach((r, i) => {
+    if (!r || typeof r !== 'object'){ console.warn(`[rounds] #${i} is not an object — skipped`); return; }
+    const round = {
+      round:        Number.isFinite(r.round) ? r.round : i + 1,
+      theme:        typeof r.theme === 'string' ? r.theme : `Round ${i + 1}`,
+      description:  typeof r.description === 'string' ? r.description : 'Move!',
+      workoutFocus: typeof r.workoutFocus === 'string' ? r.workoutFocus : 'Full Body',
+      durationSec:  Number.isFinite(r.durationSec) ? Math.max(10, r.durationSec) : 60,
+      difficulty: {
+        spawnIntervalMs: Number.isFinite(r.difficulty?.spawnIntervalMs)
+          ? Math.max(400, r.difficulty.spawnIntervalMs) : 1800,
+        objectSpeed: Number.isFinite(r.difficulty?.objectSpeed)
+          ? Math.min(3, Math.max(0.25, r.difficulty.objectSpeed)) : 1
+      },
+      spawnRoutine: []
+    };
+
+    const routine = Array.isArray(r.spawnRoutine) ? r.spawnRoutine : [];
+    routine.forEach((s, j) => {
+      if (!s || !ACTION_TYPES.includes(s.type)){
+        console.warn(`[rounds] round ${round.round} entry ${j}: unknown type "${s?.type}" — dropped`);
+        return;
+      }
+      round.spawnRoutine.push({
+        type:   s.type,
+        label:  typeof s.label === 'string' ? s.label : s.type.replace(/_/g, ' ').toUpperCase(),
+        color:  /^#[0-9a-f]{3,8}$/i.test(s.color || '') ? s.color : '#2BE8FF',
+        points: Number.isFinite(s.points) ? Math.max(1, Math.round(s.points)) : 10
+      });
+    });
+
+    if (!round.spawnRoutine.length){
+      console.warn(`[rounds] round ${round.round} has no valid targets — skipped`);
+      return;
+    }
+    out.push(round);
+  });
+
+  if (!out.length){ console.warn('[rounds] nothing valid — using fallback round'); return [FALLBACK_ROUND]; }
+  console.info(`[rounds] ${out.length} round(s) loaded`);
+  return out;
+}
+
+const rounds = validateRounds(ROUNDS);
+
+/* ---------- 4. DOM + STAGE ---------- */
+const $ = id => document.getElementById(id);
+const canvas = $('stage'), ctx = canvas.getContext('2d');
+const video = $('cam');
+const screens = $('screens');
+const panels = { start:$('pStart'), error:$('pError'), framing:$('pFraming'), calib:$('pCalib'), rest:$('pRest') };
+
+function showPanel(name){
+  Object.entries(panels).forEach(([k, el]) => el.classList.toggle('hidden', k !== name));
+  screens.classList.toggle('hidden', !name);
+  $('hudchips').classList.toggle('hidden', !(name === null && S.phase === 'play'));
+}
+
+// letterboxed 16:9 play area inside the viewport
+const stage = { x:0, y:0, w:0, h:0 };
+function layout(){
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  canvas.width = Math.round(innerWidth * dpr);
+  canvas.height = Math.round(innerHeight * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const AR = 16 / 9;
+  let w = innerWidth, h = w / AR;
+  if (h > innerHeight){ h = innerHeight; w = h * AR; }
+  stage.w = w; stage.h = h;
+  stage.x = (innerWidth - w) / 2;
+  stage.y = (innerHeight - h) / 2;
+  if (S.calibrated && S.phase !== 'demo-play') requestRecalibration('resize');
+}
+addEventListener('resize', layout);
+addEventListener('orientationchange', () => setTimeout(layout, 120));
+
+/* ---------- 5. APP STATE ---------- */
+const S = {
+  phase: 'start',          // start | framing | calib | intro | play | rest | error
+  demo: false,
+  seated: false,
+  running: false,
+  calibrated: false,
+  cal: null,               // {sw, noseY, hipY, hipX, shoulderY, ankleY:{l,r}}
+  framingHeldMs: 0,
+  tposeHeldMs: 0,
+  lostMs: 0,
+  roundIdx: 0,
+  score: 0,
+  scorePop: 0,
+  energy: 0,
+  timeLeftMs: 0,
+  targets: [],
+  particles: [],
+  events: [],
+  shakeMs: 0,
+  countdownMs: 0,
+  stats: null,
+  lastActionAt: Object.fromEntries(ACTION_TYPES.map(t => [t, 0])),
+  held: { duck:false, jump:false, dodge_left:false, dodge_right:false, kick_left:false, kick_right:false },
+  spawnTimerMs: 0,
+  routineIdx: 0,
+  instruction: '',
+};
+
+if (location.protocol === 'file:') $('fileHint').style.display = 'block';
+
+/* ---------- 6. CAMERA + MODEL ---------- */
+let poseLandmarker = null, lastInferTs = -1, lastVideoTime = -1, inferInFlight = false;
+
+async function loadModel(){
+  const { FilesetResolver, PoseLandmarker } =
+    await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14");
+  const files = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
+  const opts = delegate => ({
+    baseOptions: {
+      modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+      delegate
+    },
+    runningMode: "VIDEO",
+    numPoses: 1,
+    minPoseDetectionConfidence: 0.5,
+    minPosePresenceConfidence: 0.5,
+    minTrackingConfidence: 0.5
+  });
+  try {
+    poseLandmarker = await PoseLandmarker.createFromOptions(files, opts("GPU"));
+    console.info('[pose] GPU delegate ready');
+  } catch (e) {
+    console.warn('[pose] GPU delegate failed, falling back to CPU', e);
+    poseLandmarker = await PoseLandmarker.createFromOptions(files, opts("CPU"));
+    console.info('[pose] CPU delegate ready');
+  }
+}
+
+const CAM_ERRORS = {
+  NotAllowedError:   ["The camera said no", "Your browser is holding the camera back. Click the little camera icon in the address bar and choose Allow — then hit Try again."],
+  NotFoundError:     ["I can't find a camera", "There's no webcam plugged in that I can see. Plug one in, or play with the keyboard instead — the game is exactly the same."],
+  NotReadableError:  ["Something else is using the camera", "Another app (a video call, maybe?) has grabbed it. Close that app, then hit Try again."],
+  SecurityError:     ["Cameras need a real web address", "Open this page through a local server: run python3 -m http.server 8000 in this folder, then visit localhost:8000."],
+};
+
+async function startCamera(){
+  showPanel('error');
+  $('errTitle').textContent = 'Warming up…';
+  $('errBody').textContent = 'Loading the movement tracker. First time takes a few seconds.';
+  try {
+    if (!poseLandmarker) await loadModel();
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 960 }, height: { ideal: 540 }, facingMode: 'user' }, audio: false
+    });
+    video.srcObject = stream;
+    await video.play();
+    S.demo = false;
+    enterFraming();
+  } catch (err) {
+    const [title, body] = CAM_ERRORS[err.name] ||
+      ["Something went sideways", (err.message || 'Unknown problem') + " — you can still play with the keyboard."];
+    $('errTitle').textContent = title;
+    $('errBody').textContent = body;
+    showPanel('error');
+    console.error('[camera]', err.name, err);
+  }
+}
+
+/* ---------- 7. LANDMARK SMOOTHING + PLAYER MODEL ---------- */
+const history = [];                       // last N raw landmark arrays
+function smooth(lms){
+  history.push(lms);
+  if (history.length > CFG.SMOOTH_FRAMES) history.shift();
+  return lms.map((_, i) => {
+    let x=0, y=0, v=0;
+    for (const f of history){ x += f[i].x; y += f[i].y; v += (f[i].visibility ?? 0); }
+    const n = history.length;
+    return { x:x/n, y:y/n, visibility:v/n };
+  });
+}
+
+// normalized landmark -> mirrored stage pixels (canvas reads like a mirror)
+const toPx = lm => ({ x: stage.x + (1 - lm.x) * stage.w, y: stage.y + lm.y * stage.h, v: lm.visibility ?? 0 });
+
+let P = null, prevP = null;               // current / previous player frame
+function buildPlayer(lms, tMs){
+  const g = i => toPx(lms[i]);
+  const ls = g(LM.L_SHOULDER), rs = g(LM.R_SHOULDER), lh = g(LM.L_HIP), rh = g(LM.R_HIP);
+  return {
+    t: tMs,
+    nose: g(LM.NOSE), lw: g(LM.L_WRIST), rw: g(LM.R_WRIST),
+    la: g(LM.L_ANKLE), ra: g(LM.R_ANKLE), ls, rs, lh, rh,
+    hip: { x:(lh.x+rh.x)/2, y:(lh.y+rh.y)/2, v:Math.min(lh.v, rh.v) },
+    shoulderY: (ls.y + rs.y) / 2,
+    sw: Math.max(Math.hypot(ls.x - rs.x, ls.y - rs.y), stage.w * 0.04)   // shoulder width in px
+  };
+}
+const speedSW = (a, b, dtMs, sw) => (dtMs <= 0 ? 0 : Math.hypot(a.x-b.x, a.y-b.y) / sw / (dtMs/1000));
+
+/* ---------- 8. FRAMING CHECK ---------- */
+function checkFraming(p, dtMs){
+  const V = CFG.FRAMING_VISIBILITY;
+  const ok = {
+    nose:   p.nose.v > V,
+    wrists: p.lw.v > V && p.rw.v > V,
+    hips:   p.lh.v > V && p.rh.v > V,
+    ankles: p.la.v > V && p.ra.v > V
+  };
+  $('ckNose').classList.toggle('on', ok.nose);
+  $('ckWrists').classList.toggle('on', ok.wrists);
+  $('ckHips').classList.toggle('on', ok.hips);
+  $('ckAnkles').classList.toggle('on', ok.ankles);
+
+  const all = ok.nose && ok.wrists && ok.hips && ok.ankles;
+  S.framingHeldMs = all ? S.framingHeldMs + dtMs : 0;
+  $('framingBar').style.width = Math.min(100, S.framingHeldMs / CFG.FRAMING_HOLD_MS * 100) + '%';
+  if (S.framingHeldMs >= CFG.FRAMING_HOLD_MS) enterCalibration();
+}
+
+/* ---------- 9. T-POSE CALIBRATION ---------- */
+function checkCalibration(p, dtMs){
+  const sw = p.sw;
+  const armsLevel = Math.abs(p.lw.y - p.ls.y) < 0.35*sw && Math.abs(p.rw.y - p.rs.y) < 0.35*sw;
+  const armsOut   = Math.abs(p.lw.x - p.ls.x) > 1.0*sw && Math.abs(p.rw.x - p.rs.x) > 1.0*sw;
+  const visible   = Math.min(p.nose.v, p.lw.v, p.rw.v, p.la.v, p.ra.v) > CFG.MIN_VISIBILITY;
+  const seatedOK  = S.seated ? true : (p.la.v > CFG.MIN_VISIBILITY && p.ra.v > CFG.MIN_VISIBILITY);
+
+  const good = armsLevel && armsOut && visible && seatedOK;
+  S.tposeHeldMs = good ? S.tposeHeldMs + dtMs : Math.max(0, S.tposeHeldMs - dtMs * 0.5);
+  $('calibBar').style.width = Math.min(100, S.tposeHeldMs / CFG.TPOSE_HOLD_MS * 100) + '%';
+  $('calibHint').textContent = good
+    ? 'Perfect — hold it!'
+    : (armsOut ? 'Straighten your arms out level with your shoulders.' : 'Arms straight out to the sides, stand tall.');
+
+  if (S.tposeHeldMs >= CFG.TPOSE_HOLD_MS){
+    S.cal = {
+      sw,
+      noseY: p.nose.y,
+      hipY: p.hip.y,
+      hipX: p.hip.x,
+      shoulderY: p.shoulderY,
+      ankleY: { l: p.la.y, r: p.ra.y }
+    };
+    S.calibrated = true;
+    console.info('[calibration]', S.cal);
+    startRound(S.roundIdx);
+  }
+}
+
+function requestRecalibration(reason){
+  if (S.demo) return;
+  console.info('[calibration] reset:', reason);
+  S.calibrated = false; S.tposeHeldMs = 0; S.framingHeldMs = 0;
+  S.phase = 'calib'; showPanel('calib');
+}
+
+/* ---------- 10. ACTION DETECTION ---------- */
+function fire(type, meta){
+  const now = performance.now();
+  if (now - S.lastActionAt[type] < CFG.ACTION_COOLDOWN_MS) return;
+  S.lastActionAt[type] = now;
+  S.events.push({ type, ...meta });
+  console.debug(`[action] ${type}`, meta);
+}
+
+function detectActions(p, dtMs){
+  const c = S.cal; if (!c) return;
+  const sw = c.sw, V = CFG.MIN_VISIBILITY;
+  const dt = prevP ? p.t - prevP.t : 0;
+
+  // --- punches: wrist speed above threshold, position handed to the engine
+  if (p.lw.v > V && prevP){
+    const sp = speedSW(p.lw, prevP.lw, dt, sw);
+    if (sp > CFG.PUNCH_SPEED_SW) fire('punch_left',  { x:p.lw.x, y:p.lw.y, speed:+sp.toFixed(2), sw:Math.round(sw) });
+  }
+  if (p.rw.v > V && prevP){
+    const sp = speedSW(p.rw, prevP.rw, dt, sw);
+    if (sp > CFG.PUNCH_SPEED_SW) fire('punch_right', { x:p.rw.x, y:p.rw.y, speed:+sp.toFixed(2), sw:Math.round(sw) });
+  }
+
+  // --- kicks (standing: ankle lift | seated: hand strike below the hip line)
+  const kick = (side) => {
+    const key = 'kick_' + side;
+    if (S.seated){
+      const w = side === 'left' ? p.lw : p.rw;
+      const down = (w.y - c.hipY) / sw;
+      const sp = prevP ? speedSW(w, side === 'left' ? prevP.lw : prevP.rw, dt, sw) : 0;
+      const on = w.v > V && down > CFG.SEATED_KICK_DROP_SW && sp > CFG.PUNCH_SPEED_SW * 0.6;
+      if (on && !S.held[key]) fire(key, { x:w.x, y:w.y, dropSW:+down.toFixed(2), seated:true });
+      S.held[key] = on;
+    } else {
+      const a = side === 'left' ? p.la : p.ra;
+      const rest = side === 'left' ? c.ankleY.l : c.ankleY.r;
+      const rise = (rest - a.y) / sw;
+      const on = a.v > V && rise > CFG.KICK_RISE_SW;
+      if (on && !S.held[key]) fire(key, { x:a.x, y:a.y, riseSW:+rise.toFixed(2) });
+      S.held[key] = on;
+    }
+  };
+  kick('left'); kick('right');
+
+  // --- duck / squat
+  const duckThresh = CFG.DUCK_DROP_SW * (S.seated ? CFG.SEATED_DUCK_SCALE : 1);
+  const drop = (p.nose.y - c.noseY) / sw;
+  const ducking = p.nose.v > V && drop > duckThresh;
+  if (ducking && !S.held.duck) fire('wall_duck', { dropSW:+drop.toFixed(2), needSW:+duckThresh.toFixed(2) });
+  S.held.duck = ducking;
+
+  // --- lean dodge
+  const shift = (p.hip.x - c.hipX) / sw;
+  const leftOn  = p.hip.v > V && shift < -CFG.DODGE_SHIFT_SW;
+  const rightOn = p.hip.v > V && shift >  CFG.DODGE_SHIFT_SW;
+  if (leftOn  && !S.held.dodge_left)  fire('dodge_left',  { shiftSW:+shift.toFixed(2) });
+  if (rightOn && !S.held.dodge_right) fire('dodge_right', { shiftSW:+shift.toFixed(2) });
+  S.held.dodge_left = leftOn; S.held.dodge_right = rightOn;
+
+  // --- jump (seated: both hands above the shoulder line)
+  let jumping;
+  if (S.seated){
+    const lu = (c.shoulderY - p.lw.y) / sw, ru = (c.shoulderY - p.rw.y) / sw;
+    jumping = p.lw.v > V && p.rw.v > V && lu > CFG.SEATED_JUMP_RISE_SW && ru > CFG.SEATED_JUMP_RISE_SW;
+    if (jumping && !S.held.jump) fire('jump', { leftSW:+lu.toFixed(2), rightSW:+ru.toFixed(2), seated:true });
+  } else {
+    const lu = (c.ankleY.l - p.la.y) / sw, ru = (c.ankleY.r - p.ra.y) / sw;
+    jumping = p.la.v > V && p.ra.v > V && lu > CFG.JUMP_RISE_SW && ru > CFG.JUMP_RISE_SW;
+    if (jumping && !S.held.jump) fire('jump', { leftSW:+lu.toFixed(2), rightSW:+ru.toFixed(2) });
+  }
+  S.held.jump = jumping;
+
+  // --- energy meter: reward sustained limb movement, decay when still
+  if (prevP && dt > 0){
+    const move = (Math.hypot(p.lw.x-prevP.lw.x, p.lw.y-prevP.lw.y) +
+                  Math.hypot(p.rw.x-prevP.rw.x, p.rw.y-prevP.rw.y) +
+                  Math.hypot(p.la.x-prevP.la.x, p.la.y-prevP.la.y) +
+                  Math.hypot(p.ra.x-prevP.ra.x, p.ra.y-prevP.ra.y)) / sw / (dt/1000);
+    S.energy = Math.max(0, Math.min(1, S.energy + (move * CFG.ENERGY_GAIN * 0.01 - CFG.ENERGY_DECAY * dtMs/1000)));
+  }
+}
+
+/* ---------- 11. TARGET GEOMETRY ---------- */
+function anchorFor(type){
+  const c = S.cal, sw = c.sw;
+  const ankleY = (c.ankleY.l + c.ankleY.r) / 2 || (c.hipY + sw * 1.6);
+  const off = CFG.TARGET_OFFSET_SW * sw;
+  switch (type){
+    case 'punch_left':  return { x: c.hipX - off,        y: c.shoulderY - 0.15*sw };
+    case 'punch_right': return { x: c.hipX + off,        y: c.shoulderY - 0.15*sw };
+    case 'kick_left':   return { x: c.hipX - 1.05*sw,    y: S.seated ? c.hipY + 0.9*sw : ankleY - 0.75*sw };
+    case 'kick_right':  return { x: c.hipX + 1.05*sw,    y: S.seated ? c.hipY + 0.9*sw : ankleY - 0.75*sw };
+    case 'dodge_left':  return { x: c.hipX + 1.6*sw,     y: c.hipY };   // obstacle on the right -> lean LEFT
+    case 'dodge_right': return { x: c.hipX - 1.6*sw,     y: c.hipY };
+    case 'wall_duck':   return { x: stage.x + stage.w/2, y: c.noseY + 0.35*sw };
+    case 'jump':        return { x: stage.x + stage.w/2, y: ankleY };
+    default:            return { x: stage.x + stage.w/2, y: stage.y + stage.h/2 };
+  }
+}
+
+const VERB = {
+  punch_left:'PUNCH LEFT!', punch_right:'PUNCH RIGHT!',
+  kick_left: S.seated ? 'LEFT HAND DOWN!' : 'KICK LEFT!',
+  kick_right:'KICK RIGHT!',
+  wall_duck:'SQUAT!', dodge_left:'LEAN LEFT!', dodge_right:'LEAN RIGHT!', jump:'JUMP!'
+};
+const verbFor = t => S.seated
+  ? ({ kick_left:'LEFT HAND DOWN!', kick_right:'RIGHT HAND DOWN!', wall_duck:'HEAD DOWN!', jump:'HANDS UP!' }[t] || VERB[t])
+  : VERB[t];
+
+function spawn(spec){
+  const a = anchorFor(spec.type);
+  S.targets.push({
+    ...spec, t: 0, x: a.x, y: a.y, r: CFG.HITBOX_SW * S.cal.sw,
+    resolved: false, hitFlash: 0
+  });
+}
+
+/* ---------- 12. ROUND FLOW ---------- */
+function blankStats(){
+  return { hits:0, misses:0, byType:Object.fromEntries(ACTION_TYPES.map(t => [t, 0])), best:0, streak:0 };
+}
+
+function startRound(i){
+  const r = rounds[i];
+  S.roundIdx = i;
+  S.phase = 'intro';
+  S.countdownMs = 3200;
+  S.timeLeftMs = r.durationSec * 1000;
+  S.targets = []; S.particles = []; S.events = [];
+  S.spawnTimerMs = 0; S.routineIdx = 0;
+  S.stats = blankStats();
+  S.roundStartScore = S.score;
+  S.instruction = r.description;
+  showPanel(null);
+  $('hudchips').classList.remove('hidden');
+  console.info(`[round] ${r.round} — ${r.theme} (${r.workoutFocus})`);
+}
+
+function endRound(){
+  const r = rounds[S.roundIdx], st = S.stats;
+  S.phase = 'rest';
+  S.targets = [];
+  showPanel('rest');
+  $('hudchips').classList.add('hidden');
+  $('restKicker').textContent = `${r.theme} complete`;
+  $('restTitle').textContent = st.hits > st.misses ? 'Nice moves!' : 'You kept going — that counts!';
+  $('restStats').innerHTML = `
+    <div class="stat"><span>${st.hits}</span><small>Moves landed</small></div>
+    <div class="stat"><span>${st.best}</span><small>Best streak</small></div>
+    <div class="stat"><span>${S.score}</span><small>Total score</small></div>`;
+  $('restPraise').textContent = praise(st);
+
+  let left = CFG.REST_SEC;
+  $('restCount').textContent = left;
+  clearInterval(S.restTimer);
+  S.restTimer = setInterval(() => {
+    left--; $('restCount').textContent = Math.max(0, left);
+    if (left <= 0){ clearInterval(S.restTimer); nextRound(); }
+  }, 1000);
+}
+
+function nextRound(){
+  clearInterval(S.restTimer);
+  startRound((S.roundIdx + 1) % rounds.length);   // always loops, never game over
+}
+
+function praise(st){
+  const b = st.byType;
+  const dodges = b.wall_duck + b.dodge_left + b.dodge_right;
+  const punches = b.punch_left + b.punch_right;
+  const kicks = b.kick_left + b.kick_right;
+  const lines = [
+    [dodges,  `You dodged ${dodges} obstacles!`],
+    [punches, `You threw ${punches} punches!`],
+    [kicks,   S.seated ? `You landed ${kicks} hand strikes!` : `You landed ${kicks} kicks!`],
+    [b.jump,  `You jumped ${b.jump} times!`]
+  ].filter(([n]) => n > 0).sort((a, b2) => b2[0] - a[0]);
+  return lines.length ? lines[0][1] + ' Keep it up!' : 'You showed up and moved — that is the whole game!';
+}
+
+/* ---------- 13. HITS, MISSES, PARTICLES ---------- */
+function burst(x, y, color, n = 40){
+  for (let i = 0; i < n; i++){
+    const a = Math.random() * Math.PI * 2, sp = 60 + Math.random() * 320;
+    S.particles.push({ x, y, vx: Math.cos(a)*sp, vy: Math.sin(a)*sp - 60, life: 1, color,
+                       r: 2 + Math.random() * 4 });
+  }
+}
+
+function addScore(n){
+  S.score = Math.max(S.roundStartScore ?? 0, S.score + n);
+  S.scorePop = 1;
+}
+
+function resolveHit(tg){
+  tg.resolved = true; tg.hitFlash = 1;
+  S.stats.hits++; S.stats.byType[tg.type]++;
+  S.stats.streak++; S.stats.best = Math.max(S.stats.best, S.stats.streak);
+  addScore(tg.points);
+  burst(tg.x, tg.y, tg.color, 44);
+  S.energy = Math.min(1, S.energy + 0.06);
+}
+
+function resolveMiss(tg){
+  tg.resolved = true;
+  S.stats.misses++; S.stats.streak = 0;
+  addScore(-Math.round(tg.points * CFG.MISS_FRACTION));
+  if (tg.type === 'wall_duck') S.shakeMs = CFG.SHAKE_MS;
+}
+
+function consumeEvents(){
+  for (const ev of S.events){
+    const live = S.targets.filter(t => !t.resolved && t.type === ev.type && t.t >= CFG.ACTIVE_FROM);
+    if (!live.length) continue;
+    const needsAim = ev.type.startsWith('punch') || ev.type.startsWith('kick');
+    const tg = needsAim
+      ? live.find(t => Math.hypot(ev.x - t.x, ev.y - t.y) < t.r)
+      : live[0];
+    if (tg) resolveHit(tg);
+  }
+  S.events.length = 0;
+}
+
+/* ---------- 14. GAME TICK ---------- */
+function tickGame(dtMs){
+  const r = rounds[S.roundIdx];
+
+  if (S.phase === 'intro'){
+    S.countdownMs -= dtMs;
+    if (S.countdownMs <= 0){ S.phase = 'play'; S.countdownMs = 0; }
+    consumeEvents();
+    return;
+  }
+  if (S.phase !== 'play') { S.events.length = 0; return; }
+
+  S.timeLeftMs -= dtMs;
+  S.spawnTimerMs -= dtMs;
+  if (S.spawnTimerMs <= 0){
+    spawn(r.spawnRoutine[S.routineIdx % r.spawnRoutine.length]);
+    S.routineIdx++;
+    S.spawnTimerMs = r.difficulty.spawnIntervalMs;
+  }
+
+  const travel = CFG.TRAVEL_MS / r.difficulty.objectSpeed;
+  for (const tg of S.targets){
+    tg.t += dtMs / travel;
+    tg.hitFlash = Math.max(0, tg.hitFlash - dtMs / 300);
+    if (!tg.resolved && tg.t >= 1) resolveMiss(tg);
+  }
+  consumeEvents();
+  S.targets = S.targets.filter(tg => tg.t < 1.35);
+
+  for (const p of S.particles){
+    p.vy += 900 * dtMs/1000;
+    p.x += p.vx * dtMs/1000; p.y += p.vy * dtMs/1000;
+    p.life -= dtMs / 900;
+  }
+  S.particles = S.particles.filter(p => p.life > 0);
+
+  S.scorePop = Math.max(0, S.scorePop - dtMs / 260);
+  S.shakeMs = Math.max(0, S.shakeMs - dtMs);
+  if (S.demo) S.energy = Math.max(0, S.energy - CFG.ENERGY_DECAY * dtMs/1000);
+
+  const next = S.targets.find(t => !t.resolved);
+  S.instruction = next ? `${next.label} — ${verbFor(next.type)}` : r.description;
+
+  if (S.timeLeftMs <= 0) endRound();
+}
+
+/* ---------- 15. RENDER ---------- */
+const stars = Array.from({length:90}, () => ({ x:Math.random(), y:Math.random(), r:Math.random()*1.8+.4 }));
+const roundRect = (x,y,w,h,r) => { ctx.beginPath(); ctx.roundRect(x,y,w,h,r); };
+
+function drawBackground(){
+  const g = ctx.createLinearGradient(0, 0, 0, innerHeight);
+  g.addColorStop(0, '#0B0724'); g.addColorStop(1, '#1A0B3D');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, innerWidth, innerHeight);
+  ctx.fillStyle = 'rgba(255,255,255,.5)';
+  for (const s of stars) ctx.fillRect(s.x*innerWidth, s.y*innerHeight, s.r, s.r);
+
+  if (!S.demo && video.readyState >= 2){
+    ctx.save();
+    ctx.translate(stage.x + stage.w, stage.y); ctx.scale(-1, 1);   // mirror
+    ctx.globalAlpha = 0.55;
+    ctx.drawImage(video, 0, 0, stage.w, stage.h);
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+  ctx.strokeStyle = 'rgba(59,42,122,.9)'; ctx.lineWidth = 2;
+  ctx.strokeRect(stage.x, stage.y, stage.w, stage.h);
+}
+
+function limbRings(){
+  if (!P || !S.cal) return;
+  const want = S.targets.find(t => !t.resolved && t.t >= CFG.ACTIVE_FROM);
+  const hot = want ? want.type : '';
+  const rings = [
+    ['punch_left',  P.lw, 'left hand'], ['punch_right', P.rw, 'right hand'],
+    ['kick_left',   P.la, 'left foot'], ['kick_right',  P.ra, 'right foot']
+  ];
+  for (const [type, pt, _n] of rings){
+    if (pt.v < CFG.MIN_VISIBILITY) continue;
+    const live = hot === type;
+    const rad = (live ? 0.42 : 0.3) * S.cal.sw;
+    ctx.save();
+    ctx.shadowBlur = live ? 26 : 12;
+    ctx.shadowColor = live ? (want.color || '#2BE8FF') : '#7B6BD8';
+    ctx.strokeStyle = live ? (want.color || '#2BE8FF') : 'rgba(190,175,255,.75)';
+    ctx.lineWidth = live ? 6 : 3;
+    ctx.beginPath(); ctx.arc(pt.x, pt.y, rad, 0, 7); ctx.stroke();
+    ctx.restore();
+  }
+}
+
+function drawTarget(tg){
+  const grow = Math.min(1, tg.t / CFG.ACTIVE_FROM);
+  const armed = tg.t >= CFG.ACTIVE_FROM;
+  const fade = tg.resolved ? Math.max(0, 1 - (tg.t - CFG.ACTIVE_FROM) * 2) : 1;
+  ctx.save();
+  ctx.globalAlpha = tg.resolved ? Math.max(0, 0.5 * fade) : 1;
+  ctx.shadowBlur = 30; ctx.shadowColor = tg.color;
+  ctx.fillStyle = tg.color; ctx.strokeStyle = tg.color;
+  const sw = S.cal.sw;
+
+  if (tg.type === 'wall_duck'){
+    const top = stage.y - stage.h*0.2 + (tg.y - stage.y + stage.h*0.2) * tg.t;
+    ctx.globalAlpha *= 0.42;
+    ctx.fillRect(stage.x, top - sw*0.55, stage.w, sw*1.1);
+    ctx.globalAlpha = 1; ctx.lineWidth = 4;
+    ctx.strokeRect(stage.x, top - sw*0.55, stage.w, sw*1.1);
+    label(tg, stage.x + stage.w/2, top, armed);
+  } else if (tg.type === 'jump'){
+    const y = tg.y + sw*0.2;
+    const x = stage.x + stage.w * (1 - tg.t) * 1.1;
+    ctx.globalAlpha *= 0.5; ctx.fillRect(stage.x, y - sw*0.25, stage.w, sw*0.5);
+    ctx.globalAlpha = 1; roundRect(x - sw*0.9, y - sw*0.45, sw*1.8, sw*0.9, 12); ctx.fill();
+    label(tg, x, y - sw*0.9, armed);
+  } else if (tg.type === 'dodge_left' || tg.type === 'dodge_right'){
+    const fromRight = tg.type === 'dodge_left';
+    const edge = fromRight ? stage.x + stage.w : stage.x;
+    const x = edge + (tg.x - edge) * tg.t;
+    ctx.globalAlpha *= 0.55;
+    roundRect(x - sw*0.7, stage.y + stage.h*0.12, sw*1.4, stage.h*0.8, 18); ctx.fill();
+    ctx.globalAlpha = 1; ctx.lineWidth = 4;
+    roundRect(x - sw*0.7, stage.y + stage.h*0.12, sw*1.4, stage.h*0.8, 18); ctx.stroke();
+    label(tg, x, stage.y + stage.h*0.10, armed);
+  } else {
+    const r = tg.r * (0.35 + 0.65*grow);
+    ctx.globalAlpha *= 0.35; ctx.beginPath(); ctx.arc(tg.x, tg.y, r, 0, 7); ctx.fill();
+    ctx.globalAlpha = 1; ctx.lineWidth = armed ? 7 : 4;
+    ctx.beginPath(); ctx.arc(tg.x, tg.y, r, 0, 7); ctx.stroke();
+    if (!armed){                                   // timing ring closing in
+      ctx.globalAlpha = 0.55; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(tg.x, tg.y, r + (1 - grow) * tg.r * 1.4, 0, 7); ctx.stroke();
+    }
+    label(tg, tg.x, tg.y - r - sw*0.28, armed);
+  }
+  ctx.restore();
+}
+
+function label(tg, x, y, armed){
+  ctx.save();
+  ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+  ctx.font = `700 ${Math.round(S.cal.sw*0.34)}px Fredoka, system-ui, sans-serif`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+  ctx.lineWidth = 6; ctx.strokeStyle = 'rgba(11,7,36,.9)';
+  ctx.strokeText(tg.label, x, y); ctx.fillStyle = armed ? '#FFFFFF' : tg.color;
+  ctx.fillText(tg.label, x, y);
+  ctx.restore();
+}
+
+function drawHUD(){
+  const r = rounds[S.roundIdx];
+  const pad = 22 + stage.x, padR = stage.x + stage.w - 22, top = 18 + stage.y;
+
+  // score
+  ctx.save();
+  ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+  ctx.font = '600 13px "Space Grotesk", system-ui'; ctx.fillStyle = '#A99CD8';
+  ctx.fillText('SCORE', pad, top);
+  const pop = 1 + S.scorePop * 0.28;
+  ctx.save(); ctx.translate(pad, top + 18); ctx.scale(pop, pop);
+  ctx.font = '700 42px Fredoka, system-ui'; ctx.fillStyle = '#FFD23F';
+  ctx.shadowBlur = 20; ctx.shadowColor = 'rgba(255,210,63,.6)';
+  ctx.fillText(String(S.score), 0, 0); ctx.restore();
+
+  // energy meter
+  const ew = Math.min(260, stage.w*0.28), ex = pad, ey = top + 78;
+  ctx.shadowBlur = 0; ctx.fillStyle = '#2A1A63'; roundRect(ex, ey, ew, 14, 7); ctx.fill();
+  const g = ctx.createLinearGradient(ex, 0, ex + ew, 0);
+  g.addColorStop(0, '#2BE8FF'); g.addColorStop(1, '#5BFF9E');
+  ctx.fillStyle = g; roundRect(ex, ey, Math.max(4, ew * S.energy), 14, 7); ctx.fill();
+  ctx.font = '600 12px "Space Grotesk", system-ui'; ctx.fillStyle = '#A99CD8';
+  ctx.fillText('ENERGY METER', ex, ey + 20);
+
+  // timer + theme
+  ctx.textAlign = 'right';
+  ctx.font = '700 40px Fredoka, system-ui'; ctx.fillStyle = '#F3EEFF';
+  ctx.fillText(Math.ceil(Math.max(0, S.timeLeftMs)/1000) + 's', padR, top + 18);
+  ctx.font = '600 14px "Space Grotesk", system-ui'; ctx.fillStyle = '#2BE8FF';
+  ctx.fillText(`ROUND ${r.round} · ${r.theme.toUpperCase()}`, padR, top);
+  ctx.font = '500 12px "Space Grotesk", system-ui'; ctx.fillStyle = '#A99CD8';
+  ctx.fillText(r.workoutFocus.toUpperCase() + (S.seated ? ' · SEATED' : '') + (S.demo ? ' · KEYBOARD' : ''),
+               padR, top + 66);
+
+  // instruction
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  ctx.font = `700 ${Math.round(Math.min(46, stage.w*0.038))}px Fredoka, system-ui`;
+  ctx.lineWidth = 8; ctx.strokeStyle = 'rgba(11,7,36,.85)';
+  ctx.strokeText(S.instruction, stage.x + stage.w/2, stage.y + stage.h - 92);
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillText(S.instruction, stage.x + stage.w/2, stage.y + stage.h - 92);
+  ctx.restore();
+}
+
+function drawCountdown(){
+  const n = Math.ceil((S.countdownMs - 200) / 1000);
+  const txt = n <= 0 ? 'GO!' : String(n);
+  const phase = 1 - ((S.countdownMs % 1000) / 1000);
+  ctx.save();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.translate(stage.x + stage.w/2, stage.y + stage.h/2);
+  ctx.scale(1 + phase*0.25, 1 + phase*0.25);
+  ctx.font = '700 150px Fredoka, system-ui';
+  ctx.shadowBlur = 40; ctx.shadowColor = '#FFD23F';
+  ctx.fillStyle = n <= 0 ? '#5BFF9E' : '#FFD23F';
+  ctx.globalAlpha = 0.35 + 0.65 * (1 - phase);
+  ctx.fillText(txt, 0, 0);
+  ctx.restore();
+}
+
+function render(){
+  ctx.save();
+  if (S.shakeMs > 0){
+    const k = S.shakeMs / CFG.SHAKE_MS * 14;
+    ctx.translate((Math.random()-.5)*k, (Math.random()-.5)*k);
+  }
+  drawBackground();
+  if (S.cal && (S.phase === 'play' || S.phase === 'intro')){
+    for (const tg of S.targets) drawTarget(tg);
+    limbRings();
+    for (const p of S.particles){
+      ctx.globalAlpha = Math.max(0, p.life);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(p.x, p.y, p.r, p.r);
+    }
+    ctx.globalAlpha = 1;
+    drawHUD();
+    if (S.phase === 'intro') drawCountdown();
+  } else if (P && (S.phase === 'framing' || S.phase === 'calib')){
+    ctx.strokeStyle = 'rgba(43,232,255,.85)'; ctx.lineWidth = 4;
+    for (const pt of [P.nose, P.lw, P.rw, P.la, P.ra, P.hip]){
+      if ((pt.v ?? 1) < 0.4) continue;
+      ctx.beginPath(); ctx.arc(pt.x, pt.y, 14, 0, 7); ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+/* ---------- 16. PHASES ---------- */
+function enterFraming(){
+  S.phase = 'framing'; S.framingHeldMs = 0; showPanel('framing');
+}
+function enterCalibration(){
+  S.phase = 'calib'; S.tposeHeldMs = 0; showPanel('calib');
+}
+
+/* ---------- 17. INFERENCE LOOP (decoupled, ~30fps) ---------- */
+let lastPoseAt = 0;
+function runInference(){
+  if (S.demo || !poseLandmarker || inferInFlight) return;
+  if (!video.videoWidth || video.currentTime === lastVideoTime) return;
+  lastVideoTime = video.currentTime;
+
+  inferInFlight = true;
+  try {
+    const ts = Math.max(lastInferTs + 1, performance.now());   // strictly increasing
+    lastInferTs = ts;
+    const res = poseLandmarker.detectForVideo(video, ts);
+    const lms = res?.landmarks?.[0];
+    const now = performance.now();
+    const dtMs = lastPoseAt ? now - lastPoseAt : 33;
+    lastPoseAt = now;
+
+    if (!lms){
+      P = null; history.length = 0;
+      S.lostMs += dtMs;
+      if (S.phase === 'play' && S.lostMs > CFG.LOST_PLAYER_MS) requestRecalibration('player left frame');
+      return;
+    }
+    S.lostMs = 0;
+    prevP = P;
+    P = buildPlayer(smooth(lms), now);
+
+    if (S.phase === 'framing') checkFraming(P, dtMs);
+    else if (S.phase === 'calib') checkCalibration(P, dtMs);
+    else if (S.phase === 'play') detectActions(P, dtMs);
+  } catch (e) {
+    console.error('[inference]', e);
+  } finally {
+    inferInFlight = false;
+  }
+}
+setInterval(runInference, Math.round(1000 / CFG.INFER_FPS));
+
+/* ---------- 18. RENDER LOOP ---------- */
+let lastFrame = performance.now();
+function frame(now){
+  requestAnimationFrame(frame);
+  const dtMs = Math.min(64, now - lastFrame);
+  lastFrame = now;
+  if (S.phase === 'intro' || S.phase === 'play') tickGame(dtMs);
+  render();
+}
+requestAnimationFrame(frame);
+
+/* ---------- 19. KEYBOARD / NO-CAMERA DEMO MODE ---------- */
+const KEYS = {
+  ArrowLeft:'punch_left', ArrowRight:'punch_right',
+  ArrowDown:'wall_duck',  ArrowUp:'jump',
+  z:'kick_left', x:'kick_right', q:'dodge_left', e:'dodge_right'
+};
+addEventListener('keydown', ev => {
+  const type = KEYS[ev.key] || KEYS[ev.key?.toLowerCase?.()];
+  if (!type) return;
+  ev.preventDefault();
+  if (S.phase !== 'play') return;
+  const near = S.targets.find(t => !t.resolved && t.type === type && t.t >= CFG.ACTIVE_FROM);
+  fire(type, { x: near?.x ?? 0, y: near?.y ?? 0, source:'keyboard' });
+  S.energy = Math.min(1, S.energy + 0.08);
+});
+
+function startDemo(){
+  S.demo = true;
+  S.cal = {
+    sw: stage.h * 0.20,
+    noseY: stage.y + stage.h * 0.22,
+    hipY:  stage.y + stage.h * 0.55,
+    hipX:  stage.x + stage.w * 0.5,
+    shoulderY: stage.y + stage.h * 0.32,
+    ankleY: { l: stage.y + stage.h * 0.90, r: stage.y + stage.h * 0.90 }
+  };
+  S.calibrated = true;
+  startRound(0);
+}
+
+$('pStart').insertAdjacentHTML('beforeend',
+  `<div class="keys">Keyboard: <kbd>←</kbd><kbd>→</kbd> punch · <kbd>Z</kbd><kbd>X</kbd> kick ·
+   <kbd>↓</kbd> squat · <kbd>↑</kbd> jump · <kbd>Q</kbd><kbd>E</kbd> lean</div>`);
+
+/* ---------- 20. WIRING ---------- */
+$('btnCamera').addEventListener('click', startCamera);
+$('btnRetry').addEventListener('click', startCamera);
+$('btnDemo').addEventListener('click', startDemo);
+$('btnErrDemo').addEventListener('click', startDemo);
+$('btnSkipRest').addEventListener('click', nextRound);
+
+function setSeated(on){
+  S.seated = on;
+  $('chipSeated').setAttribute('aria-pressed', String(on));
+  $('chipSeatedStart').setAttribute('aria-pressed', String(on));
+  console.info('[seated mode]', on);
+}
+$('chipSeatedStart').addEventListener('click', () => setSeated(!S.seated));
+$('chipSeated').addEventListener('click', () => setSeated(!S.seated));
+$('chipQuit').addEventListener('click', () => {
+  clearInterval(S.restTimer);
+  S.phase = 'start'; S.score = 0; S.roundIdx = 0; S.targets = []; S.particles = [];
+  showPanel('start');
+});
+
+layout();
+showPanel('start');
+console.info('[space dojo] ready · tune CFG at the top of this script');
+</script>
+</body>
+</html>

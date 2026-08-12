@@ -1,0 +1,13 @@
+1. Hole in the Wall — Use the segmentation mask, not landmarks. A wall with a cutout flies at you; you must match the silhouette. Scoring = pixel overlap %. Feels completely different because the body is a shape, not a set of pointers.
+
+2. Statue / Red Light Green Light — Invert the incentive. Score for stillness under pressure: creep forward on green, freeze on red, sub-pixel jitter detection catches you. Cheap to build, surprisingly tense.
+
+3. Air Glyphs — Trace shapes in the air with your index finger; a $1 unistroke recognizer classifies them into spells. Gesture recognition instead of hit detection. The satisfying part is drawing a lightning bolt and having it fire.
+
+4. Body Drums — Hand/foot velocity into Web Audio. Zones in space are drums, strike velocity maps to volume. Add a rhythm track and it's a real music game — timing windows, not hitboxes.
+
+5. Ragdoll Physics Playground — Your limbs become Matter.js colliders. Keep 5 balls in the air, herd them into a bucket. Nothing scripted; difficulty emerges from physics.
+
+6. Face Controller — Face landmarker blendshapes: eyebrow raise = jump, mouth open = shoot, head tilt = steer. Playable sitting at a laptop with no room, and hilarious.
+
+7. Yoga Hold / Angle Matcher — Score joint angles against a target pose and hold for 10s. Slow, precise, calming — the opposite of an arcade. Good for a stretch-break app.

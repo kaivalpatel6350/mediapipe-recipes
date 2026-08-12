@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Wave to begin — Handwave</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;800&family=IBM+Plex+Sans:wght@300;400;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="bar">
+  <div class="bar-inner">
+    <a class="wordmark" href="index.html">Handwave</a>
+    <nav><a href="index.html" aria-current='page'>Wave to begin</a><a href="tracking.html">How it reads a hand</a><a href="tuning.html">Tuning</a><a href="running.html">Running it</a></nav>
+  </div>
+  <div id="progress"></div>
+</header>
+<main>
+<section>
+  <div class="eyebrow">01 — Wave to begin</div>
+  <h1>Navigate this site with your hand.</h1>
+  <p class="lede">Turn on the camera in the corner. Pinch and drag to scroll this page. Open your palm and flick sideways to move to the next one. Nothing leaves your machine.</p>
+</section>
+
+<section>
+  <h2>Two gestures, four pages.</h2>
+  <p>Every page here is deliberately long, because scrolling is the half of this that is easy to get wrong. A swipe is a single discrete event and forgiving of noise. A scroll is continuous: it has to track your hand frame by frame, feel proportional, and stop the instant you release the pinch. If it lags or overshoots, you notice immediately.</p>
+  <div class="grid">
+    <div class="card"><h3>Pinch drag</h3><p>Touch thumb to index, move your hand up or down. The page follows like a sheet of paper under your fingers.</p></div>
+    <div class="card"><h3>Open palm swipe</h3><p>Show five fingers, flick left or right. Right goes forward, left goes back.</p></div>
+    <div class="card"><h3>Keyboard</h3><p><kbd>←</kbd> <kbd>→</kbd> change page, <kbd>↑</kbd> <kbd>↓</kbd> scroll, exactly as they always did.</p></div>
+  </div>
+</section>
+
+<section>
+  <h2>Why pinch and not point.</h2>
+  <p>Pointing is the obvious choice and the wrong one. A pointed finger has no off state: the moment your hand enters the frame it starts issuing commands, and you end up holding your arm in an unnatural pose to avoid scrolling by accident. A pinch has a clear open and closed position, which gives you a clutch — the same reason a mouse has a button rather than scrolling whenever you move it.</p>
+  <p>The pinch also survives distance. Because the thumb-to-index gap is divided by the width of your palm, the threshold holds whether your hand is filling the frame or sitting a metre back.</p>
+</section>
+
+<section>
+  <h2>What you should feel.</h2>
+  <p>Scrolling should feel like the page is attached to your hand: move down four centimetres, the page moves down a fixed amount, every time. Nothing accelerates, nothing coasts. Inertia is lovely on a trackpad, where the surface tells your fingers exactly where they are, and disorienting in mid-air, where nothing does.</p>
+  <p>Swiping should feel like a button press, not a drag. Speed is what triggers it, not distance, so a short sharp flick works and a slow wide sweep does not. That distinction is what keeps you from changing page while you are reaching for your coffee.</p>
+</section>
+
+<section>
+  <h2>Limits worth knowing.</h2>
+  <p>One hand at a time. Keep it roughly upright, since finger extension is measured vertically and a sideways hand reads as a fist. Light in front of you rather than behind, or the camera hands the model a silhouette. And there is a lower bound on frame rate below which no amount of smoothing helps — if the tracker is running at fifteen frames a second, every gesture will feel like it is happening underwater.</p>
+  <p>Scroll down to the bottom of this page and then flick right. The next page explains what the model is actually giving us.</p>
+</section>
+<a class="next" href="tracking.html">How it reads a hand &nbsp;→</a>
+</main>
+<script type="module" src="assets/gesture.js"></script>
+</body>
+</html>

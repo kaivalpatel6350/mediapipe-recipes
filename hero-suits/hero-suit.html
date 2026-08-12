@@ -1,0 +1,1644 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Hero Suit — dance and become a hero</title>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --sky:#0A1230; --deep:#141B4A; --ink:#FFF6EA; --dim:#A8B0E0;
+  --sun:#FFC93C; --pink:#FF63A5; --mint:#63FFC9;
+  --f:'Fredoka',system-ui,-apple-system,sans-serif;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--sky);color:var(--ink);
+  font-family:var(--f);user-select:none}
+canvas#stage{position:fixed;inset:0;width:100%;height:100%;display:block}
+video#cam{position:fixed;top:0;left:0;width:2px;height:2px;opacity:0;pointer-events:none}
+
+/* ---------- hero rail: big tap targets for small hands ---------- */
+#rail{position:fixed;left:0;right:0;bottom:0;display:flex;gap:10px;padding:12px 12px calc(12px + env(safe-area-inset-bottom));
+  overflow-x:auto;scrollbar-width:none;z-index:12;background:linear-gradient(to top,rgba(10,18,48,.92),rgba(10,18,48,0))}
+#rail::-webkit-scrollbar{display:none}
+.hero{flex:0 0 auto;width:104px;height:104px;border-radius:26px;border:4px solid transparent;cursor:pointer;
+  display:grid;place-content:center;gap:2px;font-family:var(--f);font-weight:600;font-size:12.5px;color:#0B1030;
+  box-shadow:0 8px 22px rgba(0,0,0,.35);transition:transform .14s ease}
+.hero .e{font-size:36px;line-height:1}
+.railtag{flex:0 0 auto;align-self:center;writing-mode:vertical-rl;transform:rotate(180deg);
+  font-size:11px;letter-spacing:.22em;color:#8E97D6;padding:0 2px}
+.hero[aria-pressed="true"]{border-color:#fff;transform:translateY(-8px) scale(1.06)}
+.hero:active{transform:scale(.94)}
+
+/* ---------- top controls: small, for the grown-up ---------- */
+#top{position:fixed;top:calc(10px + env(safe-area-inset-top));left:10px;right:10px;display:flex;gap:8px;
+  justify-content:flex-end;z-index:12}
+#top button{font-family:var(--f);font-weight:600;font-size:14px;border:0;border-radius:999px;padding:9px 15px;
+  background:rgba(20,27,74,.82);color:var(--ink);cursor:pointer;backdrop-filter:blur(8px)}
+#top button[aria-pressed="true"]{background:var(--mint);color:#0B1030}
+
+/* ---------- start / error screens ---------- */
+#screens{position:fixed;inset:0;display:grid;place-items:center;padding:18px;z-index:20}
+#screens.hidden{display:none}
+.card{width:min(560px,94vw);background:rgba(20,27,74,.94);border:3px solid #2C3684;border-radius:34px;
+  padding:28px;text-align:center;backdrop-filter:blur(14px)}
+.card.hidden{display:none}
+h1{font-size:clamp(38px,9vw,64px);line-height:.92;margin:.1em 0 .2em}
+h1 em{font-style:normal;color:var(--sun)}
+p{color:#D9DEFF;font-size:16px;line-height:1.55;margin:8px 0}
+.big{font-size:22px;padding:18px 34px;border:0;border-radius:999px;background:var(--sun);color:#0B1030;
+  font-family:var(--f);font-weight:700;cursor:pointer;margin-top:14px;box-shadow:0 10px 0 #C8930F}
+.big:active{transform:translateY(5px);box-shadow:0 5px 0 #C8930F}
+.alt{background:transparent;color:var(--ink);border:3px solid #2C3684;box-shadow:none;font-size:16px;padding:12px 22px}
+.alt:active{transform:none}
+.tip{font-size:13px;color:var(--dim);margin-top:14px}
+#loading{position:fixed;inset:0;display:grid;place-items:center;background:rgba(10,18,48,.92);z-index:30;
+  font-size:22px;color:var(--mint)}
+#loading.hidden{display:none}
+@media (max-width:520px){ .hero{width:88px;height:88px} .hero .e{font-size:30px} }
+</style>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<video id="cam" playsinline muted></video>
+
+<div id="top">
+  <button id="bMusic" aria-pressed="false">🎵</button>
+  <button id="bSparkle" aria-pressed="true">✨</button>
+  <button id="bShuffle">🎲</button>
+  <button id="bPhoto">📸</button>
+  <button id="bCam">📷</button>
+</div>
+<div id="rail"></div>
+
+<div id="loading" class="hidden">Getting your suit ready…</div>
+
+<div id="screens">
+  <div class="card" id="cStart">
+    <h1>HERO <em>SUIT</em></h1>
+    <p>Stand back so your whole body fits on the screen. Pick a suit, then dance!</p>
+    <button class="big" id="bGo">Turn on camera</button><br>
+    <button class="big alt" id="bDemo">Just show me (no camera)</button>
+    <p class="tip">🔒 Nothing is recorded or uploaded. Everything happens on this device.</p>
+  </div>
+  <div class="card hidden" id="cErr">
+    <h1 style="font-size:34px" id="errT">No camera</h1>
+    <p id="errB"></p>
+    <button class="big" id="bRetry">Try again</button><br>
+    <button class="big alt" id="bErrDemo">Play without a camera</button>
+  </div>
+</div>
+
+<script type="module">
+/* ==========================================================================
+   HERO SUIT — costumes drawn onto a tracked body.
+   MediaPipe PoseLandmarker · single file · nothing leaves the device.
+   ========================================================================== */
+const TASKS = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+const POSE_MODEL = "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task";
+
+const $ = id => document.getElementById(id);
+const canvas = $('stage'), ctx = canvas.getContext('2d');
+const video = $('cam');
+const clamp = (v,a,b) => Math.max(a, Math.min(b, v));
+const lerp = (a,b,t) => a + (b-a)*t;
+const len = (a,b) => Math.hypot(a.x-b.x, a.y-b.y);
+const ang = (a,b) => Math.atan2(b.y-a.y, b.x-a.x);
+const mid = (a,b) => ({ x:(a.x+b.x)/2, y:(a.y+b.y)/2, v:Math.min(a.v ?? 1, b.v ?? 1) });
+const rnd = (a,b) => a + Math.random()*(b-a);
+const TAU = Math.PI*2;
+
+const stage = { x:0, y:0, w:0, h:0 };
+function layout(){
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  canvas.width = Math.round(innerWidth*dpr); canvas.height = Math.round(innerHeight*dpr);
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  let w = innerWidth, h = w/(16/9);
+  if (h > innerHeight){ h = innerHeight; w = h*(16/9); }
+  stage.w=w; stage.h=h; stage.x=(innerWidth-w)/2; stage.y=(innerHeight-h)/2;
+}
+addEventListener('resize', layout);
+addEventListener('orientationchange', () => setTimeout(layout, 150));
+
+const A = {
+  mode:'demo', started:false, heroIdx:0, t:0, sparkles:true, music:false,
+  tracker:null, body:null, fps:0, lastError:null, flashMsg:'', flashT:0, shuffle:0
+};
+
+/* ---------- audio: a gentle major-key arpeggio, nothing jarring ---------- */
+let AC = null;
+const audio = {
+  ready(){
+    try {
+      if (AC === false) return null;
+      if (!AC) AC = new (window.AudioContext || window.webkitAudioContext)();
+      if (AC.state === 'suspended') AC.resume();
+      return AC;
+    } catch(e){ AC = false; return null; }
+  },
+  blip(freq, dur = .18, type = 'triangle', gain = .12){
+    const ac = this.ready(); if (!ac) return;
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = type; o.frequency.value = freq;
+    g.gain.setValueAtTime(gain, ac.currentTime);
+    g.gain.exponentialRampToValueAtTime(.0001, ac.currentTime + dur);
+    o.connect(g).connect(ac.destination); o.start(); o.stop(ac.currentTime + dur + .02);
+  },
+  sparkleSound(){ this.blip(rnd(700,1400), .12, 'sine', .07); },
+  whoosh(){ this.blip(300, .3, 'sawtooth', .05); },
+  step: 0,
+  tick(){
+    if (!A.music) return;
+    const scale = [523.25, 587.33, 659.25, 783.99, 880, 783.99, 659.25, 587.33];
+    this.blip(scale[this.step % scale.length], .34, 'triangle', .06);
+    if (this.step % 4 === 0) this.blip(130.81, .22, 'sine', .09);
+    this.step++;
+  }
+};
+setInterval(() => audio.tick(), 340);
+
+/* ---------- pose tracking ---------- */
+const IDX = { nose:0, eyeL:2, eyeR:5, earL:7, earR:8, mouthL:9, mouthR:10,
+              shL:11, shR:12, elL:13, elR:14, wrL:15, wrR:16,
+              pinkyL:17, pinkyR:18, idxL:19, idxR:20,
+              hipL:23, hipR:24, knL:25, knR:26, anL:27, anR:28,
+              heelL:29, heelR:30, toeL:31, toeR:32 };
+
+const smoothState = {};
+function smoothPt(key, p, a = 0.45){
+  const s = smoothState[key];
+  if (!s || Math.hypot(s.x-p.x, s.y-p.y) > stage.w*0.4){ smoothState[key] = { x:p.x, y:p.y }; return { ...p }; }
+  s.x = lerp(s.x, p.x, a); s.y = lerp(s.y, p.y, a);
+  return { x:s.x, y:s.y, v:p.v };
+}
+
+function bodyFromLandmarks(lm){
+  const b = {};
+  for (const [k,i] of Object.entries(IDX)){
+    const p = lm[i];
+    b[k] = smoothPt(k, { x: stage.x + (1-p.x)*stage.w, y: stage.y + p.y*stage.h, v: p.visibility ?? 1 });
+  }
+  return finishBody(b);
+}
+
+function finishBody(b){
+  b.neck = mid(b.shL, b.shR);
+  b.pelvis = mid(b.hipL, b.hipR);
+  b.sw = Math.max(len(b.shL, b.shR), stage.w*0.035);
+  b.torsoLen = Math.max(len(b.neck, b.pelvis), b.sw*0.6);
+  b.headR = Math.max(len(b.earL, b.earR)*0.72, b.sw*0.34);
+  b.headC = { x: lerp(b.nose.x, mid(b.earL,b.earR).x, .6), y: lerp(b.nose.y, mid(b.earL,b.earR).y, .55) };
+  b.headAng = ang(b.earR, b.earL);
+  b.tilt = ang(b.pelvis, b.neck) + Math.PI/2;   // torso lean
+  b.ok = Math.min(b.shL.v ?? 1, b.shR.v ?? 1, b.hipL.v ?? 1, b.hipR.v ?? 1) > 0.5;
+  return b;
+}
+
+let busy = false, lastTs = -1, lastVid = -1, fpsCount = 0, fpsAt = 0;
+async function loadTracker(){
+  $('loading').classList.remove('hidden');
+  try {
+    const mod = await import(TASKS);
+    const fs = await mod.FilesetResolver.forVisionTasks(TASKS + "/wasm");
+    const opts = d => ({ baseOptions:{ modelAssetPath: POSE_MODEL, delegate:d },
+                         runningMode:'VIDEO', numPoses:1,
+                         minPoseDetectionConfidence:.4, minPosePresenceConfidence:.4, minTrackingConfidence:.4 });
+    try { A.tracker = await mod.PoseLandmarker.createFromOptions(fs, opts('GPU')); }
+    catch(e){ console.warn('[pose] GPU failed, CPU fallback', e);
+              A.tracker = await mod.PoseLandmarker.createFromOptions(fs, opts('CPU')); }
+    console.info('[pose] ready');
+  } finally { $('loading').classList.add('hidden'); }
+}
+
+function infer(){
+  if (A.mode !== 'camera' || busy || !A.tracker) return;
+  if (!video.videoWidth || video.currentTime === lastVid) return;
+  lastVid = video.currentTime; busy = true;
+  try {
+    const ts = Math.max(lastTs+1, performance.now()); lastTs = ts;
+    const r = A.tracker.detectForVideo(video, ts);
+    A.body = r?.landmarks?.[0] ? bodyFromLandmarks(r.landmarks[0]) : null;
+    fpsCount++;
+    if (ts - fpsAt > 1000){ A.fps = Math.round(fpsCount*1000/(ts-fpsAt)); fpsCount = 0; fpsAt = ts; }
+  } catch(e){ console.error('[pose]', e); A.lastError = e.message; }
+  finally { busy = false; }
+}
+setInterval(infer, 33);
+
+const CAM_ERR = {
+  NotAllowedError:  ["Camera is switched off", "Tap the camera icon in the address bar and choose Allow, then try again."],
+  NotFoundError:    ["No camera found", "There's no webcam here — but the hero will dance on its own!"],
+  NotReadableError: ["Camera is busy", "Another app is using it. Close that app and try again."],
+  SecurityError:    ["Needs a web address", "Run: python3 -m http.server 8000 and open localhost:8000"],
+};
+async function startCamera(){
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video:{ width:{ideal:960}, height:{ideal:540}, facingMode:'user' } });
+    video.srcObject = stream; await video.play();
+    await loadTracker();
+    A.mode = 'camera'; A.started = true;
+    $('screens').classList.add('hidden');
+    $('bCam').setAttribute('aria-pressed','true');
+    return true;
+  } catch(err){
+    const [t,b] = CAM_ERR[err.name] || ["Something went wrong", (err.message||'') + " — you can still watch the hero dance."];
+    $('errT').textContent = t; $('errB').textContent = b;
+    $('cStart').classList.add('hidden'); $('cErr').classList.remove('hidden');
+    $('screens').classList.remove('hidden');
+    console.error('[camera]', err);
+    return false;
+  }
+}
+
+/* ---------- puppet: dances by itself, so the app works with no camera ----- */
+const keys = new Set();
+addEventListener('keydown', e => { keys.add(e.key.length === 1 ? e.key.toLowerCase() : e.key);
+  if (e.key === 'ArrowRight') pickHero(A.heroIdx+1);
+  if (e.key === 'ArrowLeft') pickHero(A.heroIdx-1); });
+addEventListener('keyup', e => keys.delete(e.key.length === 1 ? e.key.toLowerCase() : e.key));
+
+function puppetBody(t){
+  const beat = t*2.4;
+  const sw = stage.h*0.155;
+  const sway = Math.sin(beat)*sw*0.55 + (keys.has('a')?-sw:0) + (keys.has('d')?sw:0);
+  const bounce = Math.abs(Math.sin(beat))*sw*0.22 + (keys.has('w')?sw*0.7:0);
+  const cx = stage.x + stage.w*0.5 + sway;
+  const ground = stage.y + stage.h*0.94 - bounce;
+  const hipY = ground - stage.h*0.34;
+  const shY = hipY - sw*1.35;
+  const P = (x,y) => ({ x, y, v:1 });
+
+  const swing = Math.sin(beat*1.0), swing2 = Math.cos(beat*1.0);
+  const armA = -0.9 + swing*1.5 + (keys.has('q')?-1.4:0);
+  const armB = -0.9 - swing*1.5 + (keys.has('e')?-1.4:0);
+  const upper = sw*0.95, fore = sw*0.9;
+  const shoulderL = P(cx-sw*0.5, shY), shoulderR = P(cx+sw*0.5, shY);
+  const elL = P(shoulderL.x - Math.cos(armA)*upper*0.5 - upper*0.35, shoulderL.y + Math.sin(armA+1.6)*upper*0.6 + upper*0.35);
+  const elR = P(shoulderR.x + Math.cos(armB)*upper*0.5 + upper*0.35, shoulderR.y + Math.sin(armB+1.6)*upper*0.6 + upper*0.35);
+  const wrL = P(elL.x - Math.cos(armA*1.2)*fore*0.6 - fore*0.2, elL.y + Math.sin(armA*1.2+1.2)*fore*0.7 + fore*0.2);
+  const wrR = P(elR.x + Math.cos(armB*1.2)*fore*0.6 + fore*0.2, elR.y + Math.sin(armB*1.2+1.2)*fore*0.7 + fore*0.2);
+
+  const legLift = Math.max(0, Math.sin(beat))*sw*0.35, legLift2 = Math.max(0, -Math.sin(beat))*sw*0.35;
+  const b = {
+    nose: P(cx + Math.sin(beat*0.5)*sw*0.12, shY - sw*0.78),
+    eyeL: P(cx-sw*0.14, shY-sw*0.82), eyeR: P(cx+sw*0.14, shY-sw*0.82),
+    earL: P(cx-sw*0.3, shY-sw*0.76), earR: P(cx+sw*0.3, shY-sw*0.76),
+    mouthL: P(cx-sw*0.1, shY-sw*0.66), mouthR: P(cx+sw*0.1, shY-sw*0.66),
+    shL: shoulderL, shR: shoulderR, elL, elR, wrL, wrR,
+    idxL: P(wrL.x-sw*0.12, wrL.y+sw*0.1), idxR: P(wrR.x+sw*0.12, wrR.y+sw*0.1),
+    pinkyL: P(wrL.x-sw*0.1, wrL.y+sw*0.14), pinkyR: P(wrR.x+sw*0.1, wrR.y+sw*0.14),
+    hipL: P(cx-sw*0.4, hipY), hipR: P(cx+sw*0.4, hipY),
+    knL: P(cx-sw*0.46+swing2*sw*0.12, hipY+sw*0.95-legLift),
+    knR: P(cx+sw*0.46-swing2*sw*0.12, hipY+sw*0.95-legLift2),
+    anL: P(cx-sw*0.5+swing2*sw*0.18, ground-legLift*1.6),
+    anR: P(cx+sw*0.5-swing2*sw*0.18, ground-legLift2*1.6),
+  };
+  b.heelL = P(b.anL.x-sw*0.06, b.anL.y+sw*0.04); b.heelR = P(b.anR.x+sw*0.06, b.anR.y+sw*0.04);
+  b.toeL  = P(b.anL.x-sw*0.34, b.anL.y+sw*0.06); b.toeR  = P(b.anR.x+sw*0.34, b.anR.y+sw*0.06);
+  return finishBody(b);
+}
+
+/* ==========================================================================
+   COSTUME PRIMITIVES
+   Limbs are tapered capsules (two circles + their outer tangents), shaded
+   across their width so they read as tubes rather than flat sticks.
+   ========================================================================== */
+function capsulePath(a, b, ra, rb){
+  const d = len(a,b);
+  ctx.beginPath();
+  if (d < 0.5){ ctx.arc(a.x, a.y, Math.max(ra,rb), 0, TAU); return; }
+  const th = ang(a,b), phi = Math.acos(clamp((ra-rb)/d, -1, 1));
+  ctx.arc(a.x, a.y, ra, th+phi, th-phi);
+  ctx.arc(b.x, b.y, rb, th-phi, th+phi);
+  ctx.closePath();
+}
+
+function acrossGradient(a, b, r, cLight, cBase, cDark){
+  const th = ang(a,b), px = Math.cos(th+Math.PI/2), py = Math.sin(th+Math.PI/2);
+  const m = mid(a,b);
+  const g = ctx.createLinearGradient(m.x - px*r, m.y - py*r, m.x + px*r, m.y + py*r);
+  g.addColorStop(0, cLight); g.addColorStop(.45, cBase); g.addColorStop(1, cDark);
+  return g;
+}
+
+// core limb renderer: outline, shaded body, and a soft highlight strip
+function limb(a, b, ra, rb, H, opts = {}){
+  const c = opts.color || H.primary, dark = opts.dark || H.dark, light = opts.light || H.light;
+  ctx.save();
+  capsulePath(a, b, ra + H.line, rb + H.line);
+  ctx.fillStyle = H.outline; ctx.fill();
+  capsulePath(a, b, ra, rb);
+  ctx.fillStyle = acrossGradient(a, b, Math.max(ra,rb), light, c, dark);
+  ctx.fill();
+  if (opts.shine !== false){
+    const th = ang(a,b), px = Math.cos(th+Math.PI/2)*0.42, py = Math.sin(th+Math.PI/2)*0.42;
+    const a2 = { x:a.x - px*ra, y:a.y - py*ra }, b2 = { x:b.x - px*rb, y:b.y - py*rb };
+    ctx.globalAlpha = 0.34; capsulePath(a2, b2, ra*0.26, rb*0.26);
+    ctx.fillStyle = '#FFFFFF'; ctx.fill(); ctx.globalAlpha = 1;
+  }
+  ctx.restore();
+}
+
+// a coloured band around a limb (cuffs, knee pads, stripes)
+function band(a, b, t, thickness, r, H, color){
+  const p = { x: lerp(a.x,b.x,t), y: lerp(a.y,b.y,t) };
+  const q = { x: lerp(a.x,b.x,t+thickness), y: lerp(a.y,b.y,t+thickness) };
+  ctx.save(); capsulePath(p, q, r, r);
+  ctx.fillStyle = color; ctx.fill();
+  ctx.strokeStyle = H.outline; ctx.lineWidth = H.line*0.8; ctx.stroke(); ctx.restore();
+}
+
+/* ---------- torso: a shell that follows shoulders, waist and hips ---------- */
+function torsoPath(b, grow = 1){
+  const sw = b.sw, out = sw*0.17*grow;
+  const nrm = (p,q,d) => { const t = ang(p,q); return { x:Math.cos(t+Math.PI/2)*d, y:Math.sin(t+Math.PI/2)*d }; };
+  const side = nrm(b.shL, b.shR, 1);
+  const L = { x:b.shL.x - side.x*out, y:b.shL.y - side.y*out };
+  const R = { x:b.shR.x + side.x*out, y:b.shR.y + side.y*out };
+  const hL = { x:b.hipL.x - side.x*out*0.55, y:b.hipL.y - side.y*out*0.55 };
+  const hR = { x:b.hipR.x + side.x*out*0.55, y:b.hipR.y + side.y*out*0.55 };
+  const waistL = { x: lerp(L.x, hL.x, .55) + side.x*out*0.55, y: lerp(L.y, hL.y, .55) + side.y*out*0.55 };
+  const waistR = { x: lerp(R.x, hR.x, .55) - side.x*out*0.55, y: lerp(R.y, hR.y, .55) - side.y*out*0.55 };
+  const neck = b.neck, up = { x:(neck.x-b.pelvis.x)*0.10, y:(neck.y-b.pelvis.y)*0.10 };
+
+  ctx.beginPath();
+  ctx.moveTo(L.x, L.y);
+  ctx.quadraticCurveTo(waistL.x, waistL.y, hL.x, hL.y);
+  ctx.quadraticCurveTo(b.pelvis.x, b.pelvis.y + sw*0.22, hR.x, hR.y);
+  ctx.quadraticCurveTo(waistR.x, waistR.y, R.x, R.y);
+  ctx.quadraticCurveTo(neck.x + up.x*1.4, neck.y + up.y*1.4, L.x, L.y);
+  ctx.closePath();
+}
+
+function drawTorso(b, H){
+  ctx.save();
+  ctx.lineJoin = 'round';
+  torsoPath(b, 1.16); ctx.fillStyle = H.outline; ctx.fill();
+  torsoPath(b, 1);
+  const g = ctx.createLinearGradient(b.shL.x, b.neck.y, b.shR.x, b.pelvis.y);
+  g.addColorStop(0, H.light); g.addColorStop(.5, H.primary); g.addColorStop(1, H.dark);
+  ctx.fillStyle = g; ctx.fill();
+
+  // chest plate / belly panel in the secondary colour
+  ctx.save(); torsoPath(b, 1); ctx.clip();
+  ctx.fillStyle = H.secondary; ctx.globalAlpha = H.panelAlpha ?? 1;
+  if (H.panel === 'vee'){
+    ctx.beginPath();
+    ctx.moveTo(b.shL.x, b.neck.y); ctx.lineTo(b.shR.x, b.neck.y);
+    ctx.lineTo(b.pelvis.x, lerp(b.neck.y, b.pelvis.y, 1.1)); ctx.closePath(); ctx.fill();
+  } else if (H.panel === 'belt'){
+    const p = lerp(0.72, 0.86, 1);
+    const a = { x: lerp(b.neck.x,b.pelvis.x,p) - b.sw, y: lerp(b.neck.y,b.pelvis.y,p) };
+    const c = { x: lerp(b.neck.x,b.pelvis.x,p) + b.sw, y: lerp(b.neck.y,b.pelvis.y,p) };
+    capsulePath(a, c, b.sw*0.18, b.sw*0.18); ctx.fill();
+  } else if (H.panel === 'stripes'){
+    for (let i=0;i<4;i++){
+      const t0 = .30 + i*.15;
+      const a = { x: lerp(b.neck.x,b.pelvis.x,t0) - b.sw, y: lerp(b.neck.y,b.pelvis.y,t0) };
+      const c = { x: lerp(b.neck.x,b.pelvis.x,t0) + b.sw, y: lerp(b.neck.y,b.pelvis.y,t0) };
+      capsulePath(a, c, b.sw*0.13, b.sw*0.13); ctx.fill();
+    }
+  } else if (H.panel === 'plates'){
+    ctx.globalAlpha = .9;
+    const a = { x:b.neck.x - b.sw*0.62, y: lerp(b.neck.y,b.pelvis.y,.18) };
+    const c = { x:b.neck.x + b.sw*0.62, y: lerp(b.neck.y,b.pelvis.y,.18) };
+    capsulePath(a, c, b.sw*0.30, b.sw*0.30); ctx.fill();
+  }
+  ctx.restore();
+
+  torsoPath(b, 1); ctx.strokeStyle = H.outline; ctx.lineWidth = H.line*1.2; ctx.stroke();
+  ctx.restore();
+}
+
+/* ---------- head: a cowl, deliberately open at the face ------------------
+   A 3-year-old needs to recognise themselves in the mirror, so helmets are
+   drawn as shells and ears around the head, never over the eyes and mouth. */
+function drawCowl(b, H){
+  const r = b.headR, c = b.headC, a = b.headAng;
+  ctx.save();
+  ctx.translate(c.x, c.y); ctx.rotate(a);
+
+  // shell
+  ctx.beginPath(); ctx.ellipse(0, -r*0.12, r*1.16, r*1.30, 0, 0, TAU);
+  ctx.fillStyle = H.outline; ctx.fill();
+  ctx.beginPath(); ctx.ellipse(0, -r*0.12, r*1.06, r*1.20, 0, 0, TAU);
+  const g = ctx.createLinearGradient(-r, -r, r, r);
+  g.addColorStop(0, H.light); g.addColorStop(.55, H.primary); g.addColorStop(1, H.dark);
+  ctx.fillStyle = g; ctx.fill();
+
+  // face opening (their real face shows through)
+  ctx.save(); ctx.globalCompositeOperation = 'destination-out';
+  ctx.beginPath(); ctx.ellipse(0, r*0.16, r*0.74, r*0.86, 0, 0, TAU); ctx.fill();
+  ctx.restore();
+
+  // brow / mask edge
+  ctx.beginPath();
+  ctx.moveTo(-r*0.80, -r*0.10);
+  ctx.quadraticCurveTo(0, r*0.30, r*0.80, -r*0.10);
+  ctx.lineWidth = H.line*0.9; ctx.strokeStyle = H.outline; ctx.stroke();
+
+  if (H.head === 'armor'){
+    ctx.fillStyle = H.secondary;
+    ctx.beginPath(); ctx.roundRect(-r*0.95, -r*0.62, r*1.9, r*0.34, r*0.14); ctx.fill();
+    ctx.strokeStyle = H.outline; ctx.lineWidth = H.line*0.8; ctx.stroke();
+    ctx.fillStyle = H.glow; ctx.globalAlpha = .85;
+    ctx.beginPath(); ctx.roundRect(-r*0.70, -r*0.54, r*1.4, r*0.14, r*0.07); ctx.fill();
+    ctx.globalAlpha = 1;
+  } else if (H.head === 'ears'){                    // cat
+    for (const s of [-1, 1]){
+      ctx.beginPath();
+      ctx.moveTo(s*r*0.35, -r*1.02); ctx.lineTo(s*r*0.92, -r*1.72); ctx.lineTo(s*r*0.98, -r*0.86);
+      ctx.closePath();
+      ctx.fillStyle = H.primary; ctx.fill(); ctx.strokeStyle = H.outline; ctx.lineWidth = H.line; ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(s*r*0.50, -r*1.02); ctx.lineTo(s*r*0.84, -r*1.50); ctx.lineTo(s*r*0.88, -r*0.94);
+      ctx.closePath(); ctx.fillStyle = H.secondary; ctx.fill();
+    }
+  } else if (H.head === 'antennae'){                // bee
+    for (const s of [-1, 1]){
+      ctx.beginPath(); ctx.moveTo(s*r*0.30, -r*1.05);
+      ctx.quadraticCurveTo(s*r*0.85, -r*1.75, s*r*0.55, -r*2.05);
+      ctx.lineWidth = H.line*1.3; ctx.strokeStyle = H.outline; ctx.stroke();
+      ctx.beginPath(); ctx.arc(s*r*0.55, -r*2.05, r*0.20, 0, TAU);
+      ctx.fillStyle = H.glow; ctx.fill(); ctx.strokeStyle = H.outline; ctx.lineWidth = H.line*0.7; ctx.stroke();
+    }
+  } else if (H.head === 'fin'){                     // comet flyer
+    ctx.beginPath();
+    ctx.moveTo(0, -r*1.35); ctx.quadraticCurveTo(r*0.2, -r*1.9, -r*0.55, -r*1.62);
+    ctx.quadraticCurveTo(-r*0.2, -r*1.2, 0, -r*1.35); ctx.closePath();
+    ctx.fillStyle = H.secondary; ctx.fill(); ctx.strokeStyle = H.outline; ctx.lineWidth = H.line*0.8; ctx.stroke();
+  } else if (H.head === 'goggles'){                 // ice fox
+    ctx.fillStyle = H.secondary;
+    ctx.beginPath(); ctx.roundRect(-r*1.0, -r*0.72, r*2.0, r*0.40, r*0.18); ctx.fill();
+    ctx.strokeStyle = H.outline; ctx.lineWidth = H.line*0.8; ctx.stroke();
+    for (const s of [-1,1]){
+      ctx.beginPath(); ctx.arc(s*r*0.45, -r*0.52, r*0.24, 0, TAU);
+      ctx.fillStyle = H.glow; ctx.fill(); ctx.strokeStyle = H.outline; ctx.lineWidth = H.line*0.6; ctx.stroke();
+    }
+  } else if (H.head === 'bolt'){                    // thunder
+    ctx.fillStyle = H.glow; ctx.strokeStyle = H.outline; ctx.lineWidth = H.line*0.7;
+    ctx.beginPath();
+    ctx.moveTo(-r*0.15, -r*1.30); ctx.lineTo(r*0.55, -r*1.05); ctx.lineTo(r*0.20, -r*0.95);
+    ctx.lineTo(r*0.70, -r*0.60); ctx.lineTo(-r*0.35, -r*0.92); ctx.lineTo(r*0.05, -r*1.02);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/* ---------- chest emblems ---------- */
+const EMBLEMS = {
+  star(r){ ctx.beginPath();
+    for (let i=0;i<10;i++){ const rr = i%2 ? r*0.45 : r, t = -Math.PI/2 + i*Math.PI/5;
+      i ? ctx.lineTo(Math.cos(t)*rr, Math.sin(t)*rr) : ctx.moveTo(Math.cos(t)*rr, Math.sin(t)*rr); }
+    ctx.closePath(); },
+  bolt(r){ ctx.beginPath();
+    ctx.moveTo(-r*0.25, -r); ctx.lineTo(r*0.55, -r*0.15); ctx.lineTo(r*0.12, -r*0.05);
+    ctx.lineTo(r*0.42, r); ctx.lineTo(-r*0.55, r*0.05); ctx.lineTo(-r*0.10, -r*0.05);
+    ctx.closePath(); },
+  core(r){ ctx.beginPath(); ctx.arc(0,0,r*0.78,0,TAU);
+    ctx.moveTo(r*0.42,0); ctx.arc(0,0,r*0.42,0,TAU,true); ctx.closePath(); },
+  paw(r){ ctx.beginPath(); ctx.ellipse(0, r*0.28, r*0.62, r*0.5, 0, 0, TAU);
+    for (const [dx,dy] of [[-.55,-.42],[-.2,-.68],[.2,-.68],[.55,-.42]]){
+      ctx.moveTo(dx*r + r*0.2, dy*r); ctx.ellipse(dx*r, dy*r, r*0.2, r*0.26, 0, 0, TAU); } },
+  snowflake(r){ ctx.beginPath();
+    for (let i=0;i<6;i++){ const t = i*Math.PI/3;
+      ctx.moveTo(0,0); ctx.lineTo(Math.cos(t)*r, Math.sin(t)*r);
+      ctx.moveTo(Math.cos(t)*r*0.6, Math.sin(t)*r*0.6);
+      ctx.lineTo(Math.cos(t)*r*0.6 + Math.cos(t+1)*r*0.3, Math.sin(t)*r*0.6 + Math.sin(t+1)*r*0.3);
+      ctx.moveTo(Math.cos(t)*r*0.6, Math.sin(t)*r*0.6);
+      ctx.lineTo(Math.cos(t)*r*0.6 + Math.cos(t-1)*r*0.3, Math.sin(t)*r*0.6 + Math.sin(t-1)*r*0.3); } },
+  heart(r){ ctx.beginPath();
+    ctx.moveTo(0, r*0.85);
+    ctx.bezierCurveTo(-r*1.4, -r*0.2, -r*0.5, -r*1.1, 0, -r*0.35);
+    ctx.bezierCurveTo(r*0.5, -r*1.1, r*1.4, -r*0.2, 0, r*0.85);
+    ctx.closePath(); },
+  fish(r){ ctx.beginPath();
+    ctx.ellipse(-r*0.15, 0, r*0.85, r*0.55, 0, 0, TAU);
+    ctx.moveTo(r*0.6, 0); ctx.lineTo(r*1.15, -r*0.5); ctx.lineTo(r*1.15, r*0.5); ctx.closePath(); },
+  hex(r){ ctx.beginPath();
+    for (let i=0;i<6;i++){ const t = i*Math.PI/3 - Math.PI/6;
+      i ? ctx.lineTo(Math.cos(t)*r, Math.sin(t)*r) : ctx.moveTo(Math.cos(t)*r, Math.sin(t)*r); }
+    ctx.closePath(); },
+};
+
+function drawEmblem(b, H, t){
+  const c = { x: lerp(b.neck.x, b.pelvis.x, .34), y: lerp(b.neck.y, b.pelvis.y, .34) };
+  const r = b.sw*0.30, pulse = 1 + Math.sin(t*3)*0.05;
+  ctx.save();
+  ctx.translate(c.x, c.y); ctx.rotate(b.tilt); ctx.scale(pulse, pulse);
+  ctx.shadowBlur = 22; ctx.shadowColor = H.glow;
+  const shape = EMBLEMS[H.emblem] || EMBLEMS.star;
+  if (H.emblem === 'snowflake'){
+    shape(r); ctx.strokeStyle = H.glow; ctx.lineWidth = H.line*1.1; ctx.lineCap='round'; ctx.stroke();
+  } else {
+    ctx.beginPath(); ctx.arc(0,0,r*1.5,0,TAU);
+    ctx.fillStyle = H.emblemBg || 'rgba(0,0,0,.25)'; ctx.fill();
+    shape(r); ctx.fillStyle = H.glow; ctx.fill();
+    ctx.lineWidth = H.line*0.7; ctx.strokeStyle = H.outline; ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/* ==========================================================================
+   HEROES — original designs, one visual gimmick each
+   ========================================================================== */
+const HEROES = [
+  { id:'rocket', name:'Rocket Red', emoji:'🚀',
+    primary:'#E12E3C', light:'#FF6B6B', dark:'#8C0F22', secondary:'#FFC93C', accent:'#FFE9A8',
+    glow:'#FFE066', outline:'#2A0510', emblem:'core', panel:'plates', head:'armor',
+    bulk:1.16, cape:null, wings:false, tail:null, fx:'thrusters', trail:'#FFB03A' },
+
+  { id:'comet', name:'Comet Blue', emoji:'⭐',
+    primary:'#2E6BFF', light:'#7FA9FF', dark:'#123A9E', secondary:'#FFFFFF', accent:'#FFD84D',
+    glow:'#FFD84D', outline:'#071233', emblem:'star', panel:'vee', head:'fin',
+    bulk:1.0, cape:{ color:'#D92B4B', inner:'#8E1230' }, wings:false, tail:false, fx:'sparkle', trail:'#FFD84D' },
+
+  { id:'thunder', name:'Thunder Bolt', emoji:'⚡',
+    primary:'#7B3FE4', light:'#B98CFF', dark:'#3F1580', secondary:'#FFD400', accent:'#FFF3A8',
+    glow:'#FFE94D', outline:'#1B0640', emblem:'bolt', panel:'belt', head:'bolt',
+    bulk:1.02, cape:null, wings:false, tail:null, fx:'lightning', trail:'#FFE94D' },
+
+  { id:'cat', name:'Jungle Cat', emoji:'🐆',
+    primary:'#1FA85C', light:'#5BE39A', dark:'#0B5C31', secondary:'#123322', accent:'#C8FFE0',
+    glow:'#B6FF6B', outline:'#04220F', emblem:'paw', panel:'stripes', head:'ears',
+    bulk:0.98, cape:null, wings:false, tail:{ style:'bushy', color:'#1FA85C' }, fx:'claws', trail:'#B6FF6B' },
+
+  { id:'frost', name:'Frost Fox', emoji:'❄️',
+    primary:'#D8F3FF', light:'#FFFFFF', dark:'#7FB6D9', secondary:'#2BC5F5', accent:'#EAFBFF',
+    glow:'#2BC5F5', outline:'#0C3A55', emblem:'snowflake', panel:'vee', head:'goggles',
+    bulk:1.05, cape:{ color:'#9FE4FF', inner:'#5FB8DE' }, wings:false, tail:false, fx:'frost', trail:'#8BE7FF' },
+
+  { id:'bee', name:'Sunny Bee', emoji:'🐝',
+    primary:'#FFC61A', light:'#FFE47A', dark:'#B87C00', secondary:'#1C1508', accent:'#FFF3C4',
+    glow:'#FFF07A', outline:'#241A02', emblem:'hex', panel:'stripes', head:'antennae',
+    bulk:1.06, cape:null, wings:true, tail:null, fx:'buzz', trail:'#FFE47A' },
+
+  /* ---------------- ANIMAL SQUAD ---------------- */
+  { id:'bunny', name:'Bouncy Bunny', emoji:'🐰', family:'animal',
+    primary:'#FFE9F2', light:'#FFFFFF', dark:'#D9AFC6', secondary:'#FF9EC4', accent:'#FFD6E8',
+    glow:'#FFB3D9', outline:'#4A2438', emblem:'heart', panel:'vee', head:'plain',
+    bulk:1.08, pads:false, fx:'hop', trail:'#FFC0DC',
+    ropeEars:{ n:6, seg:0.46, r0:0.30, r1:0.22, gravity:1500, color:'#FFE9F2', inner:'#FF9EC4' },
+    tail:{ style:'puff', color:'#FFE9F2', tip:'#FFFFFF' } },
+
+  { id:'lion', name:'Roary Lion', emoji:'🦁', family:'animal',
+    primary:'#F2A03D', light:'#FFCC7A', dark:'#A85F17', secondary:'#8A4A12', accent:'#FFE0A8',
+    glow:'#FFD37A', outline:'#3A1D06', emblem:'paw', panel:'vee', head:'plain',
+    bulk:1.10, pads:false, fx:'roar', trail:'#FFD37A',
+    mane:{ n:22, color:'#C2701F', tip:'#F4B860' }, pointyEars:true,
+    tail:{ style:'tuft', color:'#F2A03D', tip:'#8A4A12' } },
+
+  { id:'elephant', name:'Trunky', emoji:'🐘', family:'animal',
+    primary:'#9AA7C7', light:'#CBD4E8', dark:'#5E6A8A', secondary:'#7C89AB', accent:'#E4EAF7',
+    glow:'#CFE0FF', outline:'#242C45', emblem:'hex', panel:'vee', head:'plain',
+    bulk:1.22, pads:false, fx:'spray', trail:'#CFE0FF',
+    bigEars:true, trunk:true, tail:{ style:'plain', color:'#9AA7C7' } },
+
+  { id:'unicorn', name:'Rainbow Unicorn', emoji:'🦄', family:'magic',
+    primary:'#FFFFFF', light:'#FFFFFF', dark:'#D6C7F0', secondary:'#B98CFF', accent:'#FFD6F5',
+    glow:'#FF9EE8', outline:'#3A2160', emblem:'star', panel:'vee', head:'plain',
+    bulk:1.04, pads:false, fx:'rainbow', trail:'#FF9EE8',
+    horn:true, rainbowMane:true, pointyEars:true,
+    tail:{ style:'bushy', rainbow:true } },
+
+  { id:'rex', name:'Stompy Rex', emoji:'🦖', family:'dino',
+    primary:'#3FAE5A', light:'#7CE08F', dark:'#1E6B33', secondary:'#F2C744', accent:'#D9FFE2',
+    glow:'#B6FF6B', outline:'#0A2E14', emblem:'hex', panel:'stripes', head:'plain',
+    bulk:1.18, pads:false, fx:'stomp', trail:'#B6FF6B',
+    ridge:true, tail:{ style:'thick', color:'#3FAE5A' } },
+
+  { id:'octopus', name:'Wiggly Octopus', emoji:'🐙', family:'sea',
+    primary:'#C266E0', light:'#E9A8FF', dark:'#7A2E96', secondary:'#FF9ED8', accent:'#FFD9F2',
+    glow:'#FFB3EC', outline:'#33094A', emblem:'fish', panel:'vee', head:'plain',
+    bulk:1.12, pads:false, fx:'bubbles', trail:'#FFB3EC',
+    tentacles:8 },
+
+  { id:'fox', name:'Sly Fox', emoji:'🦊', family:'animal',
+    primary:'#F2733B', light:'#FFA269', dark:'#A8410F', secondary:'#FFF3E4', accent:'#FFE0C4',
+    glow:'#FFC48A', outline:'#3A1405', emblem:'paw', panel:'vee', head:'plain',
+    bulk:1.02, pads:false, fx:'leaves', trail:'#FFC48A',
+    pointyEars:true, tail:{ style:'bushy', color:'#F2733B', tip:'#FFF3E4' } },
+
+  { id:'penguin', name:'Waddle Penguin', emoji:'🐧', family:'animal',
+    primary:'#2A3350', light:'#5B6790', dark:'#161C31', secondary:'#FFA83D', accent:'#FFFFFF',
+    glow:'#BFE9FF', outline:'#0A0E1C', emblem:'fish', panel:'vee', head:'plain',
+    bulk:1.20, pads:false, fx:'snow', trail:'#DFF4FF',
+    belly:'#FFFFFF', bellyPatch:true, beak:'beak', beakColor:'#FFA83D', tail:null },
+
+  { id:'tiger', name:'Stripey Tiger', emoji:'🐯', family:'animal',
+    primary:'#FF9E2C', light:'#FFC46B', dark:'#B5610A', secondary:'#FFF1DC', accent:'#FFE0A8',
+    glow:'#FFD37A', outline:'#2E1403', emblem:'paw', panel:'vee', head:'plain',
+    bulk:1.06, pads:false, fx:'dust', trail:'#FFD37A',
+    pointyEars:true, stripes:true, stripeColor:'#2E1403',
+    tail:{ style:'plain', color:'#FF9E2C' } },
+
+  { id:'trike', name:'Trusty Trike', emoji:'🦕', family:'dino',
+    primary:'#4FA8D8', light:'#8FD3F0', dark:'#22638C', secondary:'#F0C96B', accent:'#FFF0C4',
+    glow:'#9BE7FF', outline:'#0A2A3E', emblem:'hex', panel:'vee', head:'plain',
+    bulk:1.16, pads:false, fx:'charge', trail:'#9BE7FF',
+    frill:true, horns3:true, tail:{ style:'thick', color:'#4FA8D8' } },
+
+  { id:'stego', name:'Platey Stego', emoji:'🦴', family:'dino',
+    primary:'#8C7BD8', light:'#BCAEFF', dark:'#4E3F94', secondary:'#FF9E6B', accent:'#FFD6BF',
+    glow:'#FFB38A', outline:'#221A4A', emblem:'hex', panel:'vee', head:'plain',
+    bulk:1.14, pads:false, fx:'quake', trail:'#FFB38A',
+    plates:true, tail:{ style:'thick', color:'#8C7BD8', spikes:true } },
+
+  { id:'dragon', name:'Flame Dragon', emoji:'🐉', family:'magic',
+    primary:'#E0453B', light:'#FF8A6B', dark:'#8C1A16', secondary:'#FFC93C', accent:'#FFE9A8',
+    glow:'#FFB03A', outline:'#2E0605', emblem:'bolt', panel:'vee', head:'plain',
+    bulk:1.12, pads:false, fx:'fire', trail:'#FFB03A',
+    batWings:true, wingColor:'#8C1A16', ridge:true,
+    tail:{ style:'thick', color:'#E0453B', spikes:true } },
+
+  { id:'fairy', name:'Twinkle Fairy', emoji:'🧚', family:'magic',
+    primary:'#FFD6F5', light:'#FFFFFF', dark:'#D9A8E0', secondary:'#B3F0FF', accent:'#FFF3C4',
+    glow:'#FFB3EC', outline:'#4A2160', emblem:'star', panel:'vee', head:'plain',
+    bulk:0.96, pads:false, fx:'glitter', trail:'#FFB3EC',
+    wings:true, crown:true, tail:null },
+
+  { id:'mermaid', name:'Shimmer Mermaid', emoji:'🧜', family:'sea',
+    primary:'#2ED6C0', light:'#8AF5E6', dark:'#12897C', secondary:'#B98CFF', accent:'#FFD6F5',
+    glow:'#8AF5E6', outline:'#06413C', emblem:'star', panel:'vee', head:'plain',
+    bulk:1.0, pads:false, fx:'swim', trail:'#8AF5E6',
+    mergedLegs:true, tail:null },
+
+  { id:'shark', name:'Chompy Shark', emoji:'🦈', family:'sea',
+    primary:'#7C93AD', light:'#B4C6D9', dark:'#42566E', secondary:'#EFF6FF', accent:'#DCE9F5',
+    glow:'#BFE9FF', outline:'#152436', emblem:'fish', panel:'vee', head:'plain',
+    bulk:1.14, pads:false, fx:'chomp', trail:'#BFE9FF',
+    belly:'#EFF6FF', bellyPatch:true, dorsal:true, beak:'snout',
+    tail:{ style:'plain', color:'#7C93AD' } },
+
+  { id:'astro', name:'Star Astronaut', emoji:'👨‍🚀', family:'space',
+    primary:'#F2F4FF', light:'#FFFFFF', dark:'#B9C2E0', secondary:'#FF7A4D', accent:'#8AE0FF',
+    glow:'#8AE0FF', outline:'#1B2140', emblem:'star', panel:'belt', head:'plain',
+    bulk:1.22, pads:true, fx:'stars', trail:'#8AE0FF',
+    backpack:true, bubble:true, tail:null },
+];
+HEROES.forEach(h => h.line = 0);       // stroke width, set per frame from body scale
+
+/* ---------- rope physics for capes and tails ---------- */
+function makeRope(n){ return Array.from({length:n}, () => ({ x:0, y:0, px:0, py:0, init:false })); }
+// gravity and wind are accelerations in px/s^2; verlet displacement is a*dt^2
+function stepRope(rope, anchor, seg, dt, gravity = 2600, wind = 0){
+  const h = Math.min(dt, 1/30);
+  for (const p of rope) if (!p.init){ p.x = anchor.x; p.y = anchor.y; p.px = p.x; p.py = p.y; p.init = true; }
+  for (const p of rope){
+    const vx = (p.x - p.px)*0.94, vy = (p.y - p.py)*0.94;
+    p.px = p.x; p.py = p.y;
+    p.x += vx + wind*h*h; p.y += vy + gravity*h*h;
+  }
+  for (let k=0;k<10;k++){
+    rope[0].x = anchor.x; rope[0].y = anchor.y;
+    for (let i=1;i<rope.length;i++){
+      const a = rope[i-1], b = rope[i];
+      const dx = b.x-a.x, dy = b.y-a.y, d = Math.hypot(dx,dy) || 0.001;
+      const diff = (d - seg)/d*0.5;
+      a.x += dx*diff; a.y += dy*diff; b.x -= dx*diff; b.y -= dy*diff;
+    }
+  }
+}
+const ropes = {};
+function rope(name, n){ return (ropes[name] ||= makeRope(n)); }
+function resetRopes(){ for (const r of Object.values(ropes)) r.forEach(p => p.init = false); }
+
+// anchor a rope on the head, offset in head-local space so it rotates with the head
+function headAnchor(b, dx, dy){
+  const c = Math.cos(b.headAng), s2 = Math.sin(b.headAng);
+  return { x: b.headC.x + dx*c - dy*s2, y: b.headC.y + dx*s2 + dy*c };
+}
+// tapered chain of capsules along a rope
+function ropeChain(R, H, r0, r1, color, tipColor){
+  for (let i=1;i<R.length;i++){
+    const t0 = (i-1)/(R.length-1), t1 = i/(R.length-1);
+    limb(R[i-1], R[i], Math.max(1.5, lerp(r0,r1,t0)), Math.max(1.2, lerp(r0,r1,t1)), H,
+         { color: (tipColor && i >= R.length-2) ? tipColor : color, shine:false });
+  }
+}
+
+function drawCape(b, H, dt, t){
+  const seg = b.torsoLen*0.20, wind = Math.sin(t*2.2)*1700 + Math.cos(t*3.7)*700;
+  const aL = { x:b.shL.x, y:b.shL.y - b.sw*0.05 }, aR = { x:b.shR.x, y:b.shR.y - b.sw*0.05 };
+  const L = rope('capeL', 9), R = rope('capeR', 9);
+  stepRope(L, aL, seg, dt, 2800, wind);
+  stepRope(R, aR, seg, dt, 2800, wind*0.82);
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(L[0].x, L[0].y);
+  for (let i=1;i<L.length;i++){
+    const w = 1 + i*0.10, o = (L[i].x - R[i].x)*0.10*w;
+    ctx.lineTo(L[i].x - o, L[i].y);
+  }
+  for (let i=R.length-1;i>=0;i--){
+    const w = 1 + i*0.10, o = (L[i].x - R[i].x)*0.10*w;
+    ctx.lineTo(R[i].x + o, R[i].y);
+  }
+  ctx.closePath();
+  const tip = L[L.length-1];
+  const g = ctx.createLinearGradient(b.neck.x, b.neck.y, tip.x, tip.y);
+  g.addColorStop(0, H.cape.color); g.addColorStop(1, H.cape.inner);
+  ctx.fillStyle = g; ctx.fill();
+  ctx.strokeStyle = H.outline; ctx.lineWidth = H.line; ctx.lineJoin='round'; ctx.stroke();
+  ctx.restore();
+}
+
+function drawTail(b, H, dt, t){
+  const S = H.tail.style || 'plain';
+  const spec = { plain:{n:10,seg:.34,r0:.17,r1:.05,g:1500,w:4200},
+                 thick:{n:11,seg:.42,r0:.34,r1:.06,g:2600,w:1500},
+                 bushy:{n:9, seg:.30,r0:.24,r1:.20,g:1400,w:3200},
+                 tuft: {n:10,seg:.32,r0:.13,r1:.06,g:1500,w:4200},
+                 puff: {n:3, seg:.22,r0:.16,r1:.20,g:1600,w:900} }[S];
+  const anchor = { x: b.pelvis.x, y: b.pelvis.y + b.sw*0.12 };
+  const T = rope('tail', spec.n);
+  stepRope(T, anchor, b.sw*spec.seg, dt, spec.g, Math.sin(t*4.5)*spec.w);
+  const col = H.tail.color || H.primary;
+
+  if (H.tail.rainbow){
+    for (let i=1;i<T.length;i++)
+      limb(T[i-1], T[i], b.sw*lerp(spec.r0,spec.r1,(i-1)/T.length), b.sw*lerp(spec.r0,spec.r1,i/T.length), H,
+           { color: RAINBOW[i % RAINBOW.length], shine:false });
+  } else {
+    ropeChain(T, H, b.sw*spec.r0, b.sw*spec.r1, col, S === 'plain' ? H.accent : null);
+  }
+  const tip = T[T.length-1];
+  if (H.tail.spikes){
+    const a2 = ang(T[T.length-2], tip);
+    for (const off of [-0.7, -0.25, 0.25, 0.7]){
+      ctx.save(); ctx.translate(tip.x, tip.y); ctx.rotate(a2 + off);
+      ctx.beginPath(); ctx.moveTo(-b.sw*0.06, 0); ctx.lineTo(b.sw*0.55, 0); ctx.lineTo(-b.sw*0.06, b.sw*0.12);
+      ctx.closePath(); ctx.fillStyle = H.accent; ctx.fill();
+      ctx.strokeStyle = H.outline; ctx.lineWidth = H.line*0.6; ctx.stroke(); ctx.restore();
+    }
+  }
+  if (S === 'tuft' || S === 'puff'){
+    ctx.save();
+    ctx.beginPath(); ctx.arc(tip.x, tip.y, b.sw*(S === 'puff' ? 0.28 : 0.20), 0, TAU);
+    ctx.fillStyle = H.tail.tip || H.accent; ctx.fill();
+    ctx.strokeStyle = H.outline; ctx.lineWidth = H.line; ctx.stroke();
+    ctx.restore();
+  }
+  if (S === 'bushy'){
+    ctx.save(); ctx.strokeStyle = H.accent; ctx.lineWidth = H.line*0.8; ctx.lineCap='round';
+    for (let i=2;i<T.length;i++){
+      const a2 = ang(T[i-1], T[i]) + Math.PI/2;
+      for (const sgn of [-1,1]){
+        ctx.beginPath(); ctx.moveTo(T[i].x, T[i].y);
+        ctx.lineTo(T[i].x + Math.cos(a2)*sgn*b.sw*0.22, T[i].y + Math.sin(a2)*sgn*b.sw*0.22);
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+}
+
+function drawWings(b, H, t){
+  const flap = Math.sin(t*14)*0.35;
+  for (const s of [-1, 1]){
+    const base = { x: lerp(b.neck.x, b.pelvis.x, .18) + s*b.sw*0.30, y: lerp(b.neck.y, b.pelvis.y, .18) };
+    ctx.save(); ctx.translate(base.x, base.y); ctx.rotate(b.tilt + s*(0.6 + flap));
+    for (const [scale, alpha] of [[1, .42], [0.72, .34]]){
+      ctx.beginPath();
+      ctx.ellipse(s*b.sw*0.85*scale, -b.sw*0.25*scale, b.sw*0.86*scale, b.sw*0.34*scale, s*0.35, 0, TAU);
+      ctx.fillStyle = '#FFFFFF'; ctx.globalAlpha = alpha; ctx.fill();
+      ctx.globalAlpha = .9; ctx.strokeStyle = 'rgba(255,255,255,.85)'; ctx.lineWidth = H.line*0.7; ctx.stroke();
+    }
+    ctx.restore();
+  }
+  ctx.globalAlpha = 1;
+}
+
+/* ==========================================================================
+   FULL COSTUME
+   ========================================================================== */
+function drawHero(b, H, dt, t){
+  const sw = b.sw, K = H.bulk;
+  H.line = Math.max(2, sw*0.055);
+  const R = {
+    upper: sw*0.165*K, elbow: sw*0.145*K, wrist: sw*0.125*K, glove: sw*0.20*K,
+    thigh: sw*0.215*K, knee: sw*0.175*K, ankle: sw*0.135*K, boot: sw*0.21*K
+  };
+  const vis = p => (p.v ?? 1) > 0.25;
+
+  if (H.tentacles) drawTentacles(b, H, dt, t);
+  if (H.batWings) drawBatWings(b, H, t);
+  if (H.backpack) drawBackpack(b, H);
+  if (H.cape) drawCape(b, H, dt, t);
+  if (H.wings) drawWings(b, H, t);
+  if (H.tail) drawTail(b, H, dt, t);
+
+  // legs (or one merged tail)
+  if (H.mergedLegs) drawMerTail(b, H, t);
+  else for (const [hip, kn, an, heel, toe] of [[b.hipL,b.knL,b.anL,b.heelL,b.toeL], [b.hipR,b.knR,b.anR,b.heelR,b.toeR]]){
+    if (!vis(kn)) continue;
+    limb(hip, kn, R.thigh, R.knee, H);
+    limb(kn, an, R.knee, R.ankle, H);
+    band(kn, an, 0, .16, R.knee*1.05, H, H.secondary);
+    if (vis(an)){
+      limb(an, toe && vis(toe) ? toe : { x:an.x, y:an.y + sw*0.22 }, R.boot, R.boot*0.72, H,
+           { color:H.secondary, light:H.accent, dark:H.dark, shine:false });
+      band(kn, an, .82, .12, R.ankle*1.35, H, H.accent);
+    }
+  }
+
+  if (H.ridge) drawRidge(b, H, t);
+  if (H.plates) drawPlates(b, H);
+  if (H.dorsal) drawDorsalFin(b, H);
+  drawTorso(b, H);
+  if (H.bellyPatch) drawBelly(b, H);
+  if (H.rainbowMane) drawRainbowMane(b, H, t);
+  if (H.emblem) drawEmblem(b, H, t);
+
+  // shoulder pads
+  if (H.pads !== false) for (const s of [b.shL, b.shR]){
+    ctx.save();
+    ctx.beginPath(); ctx.ellipse(s.x, s.y, R.upper*1.55, R.upper*1.25, b.tilt, 0, TAU);
+    ctx.fillStyle = H.secondary; ctx.fill();
+    ctx.strokeStyle = H.outline; ctx.lineWidth = H.line; ctx.stroke();
+    ctx.restore();
+  }
+
+  // arms
+  for (const [sh, el, wr, hand] of [[b.shL,b.elL,b.wrL,b.idxL], [b.shR,b.elR,b.wrR,b.idxR]]){
+    if (!vis(el)) continue;
+    limb(sh, el, R.upper, R.elbow, H);
+    limb(el, wr, R.elbow, R.wrist, H);
+    if (vis(wr)){
+      band(el, wr, .76, .14, R.wrist*1.3, H, H.accent);
+      ctx.save();
+      ctx.beginPath(); ctx.arc(wr.x, wr.y, R.glove, 0, TAU);
+      const g = ctx.createRadialGradient(wr.x - R.glove*.3, wr.y - R.glove*.3, R.glove*.2, wr.x, wr.y, R.glove);
+      g.addColorStop(0, H.accent); g.addColorStop(1, H.secondary);
+      ctx.fillStyle = g; ctx.fill();
+      ctx.strokeStyle = H.outline; ctx.lineWidth = H.line; ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  if (H.bigEars) drawBigEars(b, H, t);
+  if (H.pointyEars) drawPointyEars(b, H);
+  if (H.mane) drawMane(b, H, t);
+  if (H.frill) drawFrill(b, H);
+  drawCowl(b, H);
+  if (H.horns3) drawHorns3(b, H);
+  if (H.beak) drawBeak(b, H, H.beak);
+  if (H.crown) drawCrown(b, H, t);
+  if (H.bubble) drawBubbleHelmet(b, H);
+  if (H.horn) drawHorn(b, H, t);
+  if (H.ropeEars) drawRopeEars(b, H, dt, t);
+  if (H.trunk) drawTrunk(b, H, dt, t);
+  if (H.stripes) drawStripes(b, H, R);
+}
+
+/* ==========================================================================
+   SPARKLES, THRUSTERS, LIGHTNING — the reward for moving
+   ========================================================================== */
+const bits = [];
+function spawnBit(x, y, color, opts = {}){
+  bits.push({ x, y, vx: opts.vx ?? rnd(-90,90), vy: opts.vy ?? rnd(-160,-20),
+              life:1, decay: opts.decay ?? rnd(.8,1.6), color,
+              r: opts.r ?? rnd(3,9), kind: opts.kind || 'spark', spin: rnd(-4,4), a: 0 });
+}
+function stepBits(dt){
+  for (const p of bits){
+    p.vy += (p.kind === 'confetti' ? 700 : 240)*dt;
+    p.x += p.vx*dt; p.y += p.vy*dt; p.life -= dt*p.decay; p.a += p.spin*dt;
+  }
+  for (let i=bits.length-1;i>=0;i--) if (bits[i].life <= 0) bits.splice(i,1);
+}
+function drawBits(){
+  for (const p of bits){
+    ctx.save(); ctx.globalAlpha = clamp(p.life,0,1); ctx.translate(p.x,p.y); ctx.rotate(p.a);
+    ctx.fillStyle = p.color; ctx.shadowBlur = 14; ctx.shadowColor = p.color;
+    if (p.kind === 'confetti'){ ctx.fillRect(-p.r*0.6, -p.r*0.3, p.r*1.2, p.r*0.6); }
+    else if (p.kind === 'star'){
+      ctx.beginPath();
+      for (let i=0;i<10;i++){ const rr = i%2 ? p.r*0.4 : p.r, t = i*Math.PI/5;
+        i ? ctx.lineTo(Math.cos(t)*rr, Math.sin(t)*rr) : ctx.moveTo(Math.cos(t)*rr, Math.sin(t)*rr); }
+      ctx.closePath(); ctx.fill();
+    } else { ctx.beginPath(); ctx.arc(0,0,p.r*clamp(p.life,0,1),0,TAU); ctx.fill(); }
+    ctx.restore();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function jaggedLine(a, c, amp, color, w){
+  ctx.save(); ctx.strokeStyle = color; ctx.lineWidth = w; ctx.lineCap='round';
+  ctx.shadowBlur = 20; ctx.shadowColor = color;
+  ctx.beginPath(); ctx.moveTo(a.x, a.y);
+  const n = 6;
+  for (let i=1;i<n;i++){
+    const t = i/n, px = lerp(a.x,c.x,t), py = lerp(a.y,c.y,t);
+    ctx.lineTo(px + rnd(-amp,amp), py + rnd(-amp,amp));
+  }
+  ctx.lineTo(c.x, c.y); ctx.stroke(); ctx.restore();
+}
+
+const prevPts = {};
+function effects(b, H, dt, t){
+  const sw = b.sw;
+  const speedOf = (key, p) => {
+    const q = prevPts[key]; prevPts[key] = { x:p.x, y:p.y };
+    return q ? Math.hypot(p.x-q.x, p.y-q.y)/sw/Math.max(dt,.001) : 0;
+  };
+  const hands = [['wrL', b.wrL], ['wrR', b.wrR]], feet = [['anL', b.anL], ['anR', b.anR]];
+
+  for (const [k, p] of hands){
+    const s = speedOf(k, p);
+    if (!A.sparkles) continue;
+    if (s > 1.4){
+      const n = clamp(Math.round(s), 1, 4);
+      for (let i=0;i<n;i++)
+        spawnBit(p.x + rnd(-sw*.2,sw*.2), p.y + rnd(-sw*.2,sw*.2), H.trail,
+                 { kind: H.fx === 'frost' ? 'spark' : 'star', r: rnd(4,10) });
+      if (Math.random() < .06) audio.sparkleSound();
+    }
+    if (H.fx === 'thrusters' && s > 0.8){
+      ctx.save(); ctx.globalAlpha = clamp(s/4, 0, .8);
+      const g = ctx.createRadialGradient(p.x, p.y, 2, p.x, p.y, sw*0.55);
+      g.addColorStop(0, '#FFF3C4'); g.addColorStop(.5, H.trail); g.addColorStop(1, 'rgba(255,120,0,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(p.x, p.y, sw*0.55, 0, TAU); ctx.fill(); ctx.restore();
+    }
+  }
+  for (const [k, p] of feet){
+    const s = speedOf(k, p);
+    if (H.fx === 'thrusters' && s > 0.9){
+      ctx.save(); ctx.globalAlpha = clamp(s/5, 0, .7);
+      const g = ctx.createRadialGradient(p.x, p.y, 2, p.x, p.y, sw*0.45);
+      g.addColorStop(0, '#FFF3C4'); g.addColorStop(1, 'rgba(255,140,0,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(p.x, p.y, sw*0.45, 0, TAU); ctx.fill(); ctx.restore();
+    }
+    if (H.fx === 'frost' && A.sparkles && s > 1.0) spawnBit(p.x, p.y, '#CFF3FF', { vy: rnd(-30,10), r: rnd(2,5) });
+  }
+
+  // both hands up = a burst of power
+  const up = b.wrL.y < b.neck.y - sw*0.35 && b.wrR.y < b.neck.y - sw*0.35;
+  if (up && t - (A.lastBlast || -9) > 1.2){
+    A.lastBlast = t;
+    for (let i=0;i<34;i++) spawnBit(b.headC.x, b.headC.y - sw*0.4, H.glow,
+      { vx: rnd(-300,300), vy: rnd(-380,-60), kind:'star', r: rnd(5,12), decay: rnd(.6,1.1) });
+    audio.blip(880, .28, 'triangle', .1); audio.blip(1320, .3, 'sine', .07);
+    A.flashMsg = ['⭐','🎉','💫','🌟'][Math.floor(Math.random()*4)]; A.flashT = 1.1;
+  }
+  if (H.fx === 'lightning' && up) jaggedLine(b.wrL, b.wrR, sw*0.22, H.glow, H.line*1.2);
+  if (H.fx === 'claws'){
+    for (const [,p] of hands){
+      ctx.save(); ctx.strokeStyle = H.accent; ctx.lineWidth = H.line*0.8; ctx.lineCap='round';
+      for (const o of [-0.35, 0, 0.35]){
+        ctx.beginPath(); ctx.moveTo(p.x + o*sw*0.2, p.y + sw*0.12);
+        ctx.lineTo(p.x + o*sw*0.3, p.y + sw*0.34); ctx.stroke();
+      }
+      ctx.restore();
+    }
+  }
+  if (H.fx === 'rainbow'){ pushTrail(b); }
+  if (H.fx === 'bubbles' && Math.random() < .5)
+    spawnBit(b.pelvis.x + rnd(-sw*1.4, sw*1.4), b.pelvis.y + rnd(0, sw), 'rgba(180,240,255,.9)',
+             { vy: rnd(-140,-50), vx: rnd(-30,30), r: rnd(3,10), decay: .5 });
+  if (H.fx === 'roar' && up && t - (A.lastRoar || -9) > 1.2){
+    A.lastRoar = t;
+    addRing(b.headC.x, b.headC.y, H.glow, sw*7);
+    addRing(b.headC.x, b.headC.y, H.accent, sw*4.5);
+    audio.blip(120, .5, 'sawtooth', .13); audio.blip(180, .45, 'square', .07);
+    A.shake = 12;
+  }
+  if (H.fx === 'spray' && up && ropes.trunk){
+    const tip = ropes.trunk[ropes.trunk.length-1];
+    for (let i=0;i<4;i++) spawnBit(tip.x, tip.y, '#BFE9FF',
+      { vx: rnd(-260,260), vy: rnd(-620,-320), r: rnd(4,10), decay: .9 });
+    if (Math.random() < .12) audio.blip(rnd(300,520), .16, 'sine', .06);
+  }
+  if (H.fx === 'hop' && A.sparkles && Math.random() < .3)
+    spawnBit(b.pelvis.x + rnd(-sw,sw), b.pelvis.y + sw*1.4, '#FFD6E8', { vy: rnd(-90,-20), r: rnd(3,7), decay: 1.4 });
+  if (H.fx === 'leaves' && A.sparkles && Math.random() < .35)
+    spawnBit(rnd(stage.x, stage.x+stage.w), stage.y - 10,
+             ['#F2733B','#FFA269','#FFC48A','#C25A18'][Math.floor(Math.random()*4)],
+             { vy: rnd(40,110), vx: rnd(-60,60), r: rnd(5,11), decay: .28, kind:'confetti' });
+  if (H.fx === 'snow' && Math.random() < .6)
+    spawnBit(rnd(stage.x, stage.x+stage.w), stage.y - 10, '#FFFFFF',
+             { vy: rnd(30,90), vx: rnd(-40,40), r: rnd(3,7), decay: .3 });
+  if (H.fx === 'dust'){
+    for (const [k, p2] of feet) if (speedOf('dust'+k, p2) > 1.6)
+      spawnBit(p2.x, p2.y + sw*0.2, '#D9C4A8', { vy: rnd(-60,-10), vx: rnd(-90,90), r: rnd(4,9), decay: 1.6 });
+  }
+  if (H.fx === 'charge' && up && t - (A.lastCharge || -9) > 1.2){
+    A.lastCharge = t; addRing(b.headC.x, b.headC.y, H.glow, sw*6); A.shake = 10;
+    audio.blip(200, .3, 'square', .1);
+  }
+  if (H.fx === 'glitter' && A.sparkles && Math.random() < .7)
+    spawnBit(b.headC.x + rnd(-sw*1.6, sw*1.6), b.headC.y + rnd(-sw, sw*2.4),
+             ['#FFB3EC','#FFF3C4','#B3F0FF','#D6C7F0'][Math.floor(Math.random()*4)],
+             { vy: rnd(20,70), vx: rnd(-30,30), r: rnd(3,8), decay: .45, kind:'star' });
+  if (H.fx === 'fire'){
+    for (const [k, p2] of hands){
+      if (p2.y < b.neck.y && speedOf('fire'+k, p2) > 0.7){
+        for (let i=0;i<3;i++)
+          spawnBit(p2.x + rnd(-sw*.2,sw*.2), p2.y, ['#FFE066','#FFB03A','#E0453B'][i],
+                   { vy: rnd(-320,-120), vx: rnd(-140,140), r: rnd(6,14), decay: 1.5 });
+      }
+    }
+  }
+  if (H.fx === 'swim' && Math.random() < .55)
+    spawnBit(b.pelvis.x + rnd(-sw*1.2, sw*1.2), b.pelvis.y + rnd(-sw, sw*2),
+             'rgba(190,250,255,.9)', { vy: rnd(-120,-40), vx: rnd(-25,25), r: rnd(3,9), decay: .45 });
+  if (H.fx === 'chomp'){
+    const gap = Math.abs(b.wrL.y - b.wrR.y);
+    if (gap < sw*0.4 && Math.abs(b.wrL.x - b.wrR.x) < sw*1.2 && t - (A.lastChomp || -9) > .7){
+      A.lastChomp = t;
+      audio.blip(90, .18, 'square', .12);
+      const c = mid(b.wrL, b.wrR);
+      for (let i=0;i<18;i++) spawnBit(c.x, c.y, '#DCE9F5', { vx: rnd(-280,280), vy: rnd(-220,120), r: rnd(3,8) });
+    }
+  }
+  if (H.fx === 'stars' && A.sparkles && Math.random() < .4)
+    spawnBit(rnd(stage.x, stage.x+stage.w), rnd(stage.y, stage.y+stage.h), '#8AE0FF',
+             { vy: rnd(-20,20), vx: rnd(-20,20), r: rnd(2,6), decay: .5, kind:'star' });
+  if (H.fx === 'quake' && A.sparkles && Math.random() < .2)
+    spawnBit(b.pelvis.x + rnd(-sw,sw), b.pelvis.y + sw*1.5, H.accent, { vy: rnd(-70,-20), r: rnd(3,7), decay: 1.4 });
+  if (H.fx === 'buzz' && A.sparkles && Math.random() < .25)
+    spawnBit(b.pelvis.x + rnd(-sw,sw), b.pelvis.y + rnd(-sw,sw), H.glow, { r: rnd(2,5), decay: 2 });
+
+  // jump = confetti
+  const py = prevPts.__pelvis; prevPts.__pelvis = { y: b.pelvis.y };
+  if (py && (b.pelvis.y - py.y)/sw/Math.max(dt,.001) > 2.0 && (H.fx === 'stomp' || H.fx === 'quake') && t - (A.lastStomp || -9) > .6){
+    A.lastStomp = t; A.shake = 16;
+    addRing(b.pelvis.x, b.pelvis.y + sw*1.6, H.glow, sw*6);
+    audio.blip(70, .34, 'square', .16);
+    for (let i=0;i<20;i++) spawnBit(b.pelvis.x + rnd(-sw,sw), b.pelvis.y + sw*1.6, H.accent,
+      { vy: rnd(-260,-60), vx: rnd(-320,320), r: rnd(4,9) });
+  }
+  if (py && (py.y - b.pelvis.y)/sw/Math.max(dt,.001) > 2.4 && t - (A.lastJump || -9) > .8){
+    A.lastJump = t;
+    for (let i=0;i<40;i++) spawnBit(b.pelvis.x + rnd(-sw,sw), b.pelvis.y,
+      ['#FF63A5','#FFC93C','#63FFC9','#7FA9FF'][i%4], { kind:'confetti', vy: rnd(-560,-220), vx: rnd(-260,260), r: rnd(6,12) });
+    audio.blip(660, .2, 'square', .08);
+  }
+}
+
+
+/* ==========================================================================
+   ANIMAL PARTS — ears, trunk, mane, horn, ridge, tentacles, rainbow
+   ========================================================================== */
+const RAINBOW = ['#FF5D5D','#FFA83D','#FFE24D','#63E86B','#4DB8FF','#9E7BFF','#FF7BD5'];
+
+// floppy rope ears (bunny) — anchored on the head, so they swing when it moves
+function drawRopeEars(b, H, dt, t){
+  const E = H.ropeEars, r = b.headR;
+  for (const side of [-1, 1]){
+    const R = rope('ear' + side, E.n || 6);
+    const anchor = headAnchor(b, side*r*0.42, -r*0.95);
+    stepRope(R, anchor, r*(E.seg || 0.42), dt, E.gravity ?? 1500, Math.sin(t*3 + side)*900 + side*400);
+    ropeChain(R, H, r*(E.r0 || 0.30), r*(E.r1 || 0.20), E.color || H.primary);
+    // inner ear
+    ctx.save(); ctx.strokeStyle = E.inner || H.secondary; ctx.lineWidth = r*0.16; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(R[1].x, R[1].y);
+    for (let i=2;i<R.length-1;i++) ctx.lineTo(R[i].x, R[i].y);
+    ctx.stroke(); ctx.restore();
+  }
+}
+
+// big flappy ears (elephant), drawn behind the head shell
+function drawBigEars(b, H, t){
+  const r = b.headR, flap = Math.sin(t*3.2)*0.22;
+  for (const side of [-1, 1]){
+    const c = headAnchor(b, side*r*1.05, -r*0.05);
+    ctx.save(); ctx.translate(c.x, c.y); ctx.rotate(b.headAng + side*(0.35 + flap));
+    ctx.beginPath(); ctx.ellipse(side*r*0.75, 0, r*1.02, r*1.28, 0, 0, TAU);
+    ctx.fillStyle = H.outline; ctx.fill();
+    ctx.beginPath(); ctx.ellipse(side*r*0.75, 0, r*0.92, r*1.18, 0, 0, TAU);
+    const g = ctx.createLinearGradient(0, -r, side*r*1.6, r);
+    g.addColorStop(0, H.light); g.addColorStop(1, H.dark);
+    ctx.fillStyle = g; ctx.fill();
+    ctx.beginPath(); ctx.ellipse(side*r*0.80, 0, r*0.60, r*0.86, 0, 0, TAU);
+    ctx.fillStyle = H.secondary; ctx.globalAlpha = .5; ctx.fill();
+    ctx.restore();
+  }
+}
+
+// pointed ears (lion, fox)
+function drawPointyEars(b, H){
+  const r = b.headR;
+  for (const side of [-1, 1]){
+    const c = headAnchor(b, side*r*0.62, -r*0.92);
+    ctx.save(); ctx.translate(c.x, c.y); ctx.rotate(b.headAng);
+    ctx.beginPath(); ctx.ellipse(0, 0, r*0.36, r*0.40, side*0.3, 0, TAU);
+    ctx.fillStyle = H.primary; ctx.fill(); ctx.strokeStyle = H.outline; ctx.lineWidth = H.line; ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(0, r*0.04, r*0.20, r*0.24, side*0.3, 0, TAU);
+    ctx.fillStyle = H.secondary; ctx.fill();
+    ctx.restore();
+  }
+}
+
+// the trunk: a rope hanging off the face that swings as the child moves
+function drawTrunk(b, H, dt, t){
+  const r = b.headR;
+  const R = rope('trunk', 7);
+  const anchor = headAnchor(b, 0, r*0.86);
+  stepRope(R, anchor, r*0.36, dt, 1900, Math.sin(t*2.6)*1400);
+  ropeChain(R, H, r*0.34, r*0.16, H.primary);
+  ctx.save();                                   // trunk rings
+  ctx.strokeStyle = H.dark; ctx.lineWidth = H.line*0.8; ctx.globalAlpha = .55;
+  for (let i=1;i<R.length-1;i++){
+    const a2 = ang(R[i-1], R[i]) + Math.PI/2, rr = r*lerp(0.34,0.16,i/R.length);
+    ctx.beginPath();
+    ctx.moveTo(R[i].x + Math.cos(a2)*rr, R[i].y + Math.sin(a2)*rr);
+    ctx.lineTo(R[i].x - Math.cos(a2)*rr, R[i].y - Math.sin(a2)*rr);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// mane: a ring of fur spikes around the face
+function drawMane(b, H, t){
+  const r = b.headR*1.05, M = H.mane;
+  ctx.save(); ctx.translate(b.headC.x, b.headC.y); ctx.rotate(b.headAng + Math.sin(t*1.4)*0.05);
+  const n = M.n || 20;
+  for (let pass=0; pass<2; pass++){
+    ctx.beginPath();
+    for (let i=0;i<n;i++){
+      const a2 = i/n*TAU, out = r*(pass ? 1.52 : 1.86) * (1 + Math.sin(i*2.7 + t*1.2)*0.06);
+      const a3 = (i+0.5)/n*TAU;
+      if (!i) ctx.moveTo(Math.cos(a2)*r*1.05, Math.sin(a2)*r*1.05);
+      ctx.lineTo(Math.cos(a3)*out, Math.sin(a3)*out);
+      ctx.lineTo(Math.cos((i+1)/n*TAU)*r*1.05, Math.sin((i+1)/n*TAU)*r*1.05);
+    }
+    ctx.closePath();
+    ctx.fillStyle = pass ? (M.tip || H.light) : (M.color || H.dark);
+    ctx.fill();
+    if (!pass){ ctx.strokeStyle = H.outline; ctx.lineWidth = H.line; ctx.stroke(); }
+  }
+  ctx.restore();
+}
+
+// horn (unicorn): a spiral cone above the brow
+function drawHorn(b, H, t){
+  const r = b.headR;
+  const hp = headAnchor(b, 0, -r*0.98);
+  ctx.save(); ctx.translate(hp.x, hp.y); ctx.rotate(b.headAng);
+  ctx.beginPath(); ctx.moveTo(-r*0.26, 0); ctx.lineTo(0, -r*1.35); ctx.lineTo(r*0.26, 0); ctx.closePath();
+  const g = ctx.createLinearGradient(-r*0.26, 0, r*0.26, -r*1.35);
+  g.addColorStop(0, '#FFD86B'); g.addColorStop(.5, '#FFF3C4'); g.addColorStop(1, '#FFB3EC');
+  ctx.fillStyle = g; ctx.fill();
+  ctx.strokeStyle = H.outline; ctx.lineWidth = H.line*0.8; ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,255,255,.75)'; ctx.lineWidth = H.line*0.7;
+  for (let i=1;i<4;i++){
+    const y = -r*1.35*(i/4), w = r*0.26*(1 - i/4);
+    ctx.beginPath(); ctx.moveTo(-w, y); ctx.lineTo(w, y - r*0.10); ctx.stroke();
+  }
+  ctx.shadowBlur = 24; ctx.shadowColor = H.glow;
+  ctx.beginPath(); ctx.arc(0, -r*1.35, r*0.12, 0, TAU);
+  ctx.fillStyle = '#FFF3C4'; ctx.fill();
+  ctx.restore();
+}
+
+// rainbow mane along the neck and shoulders
+function drawRainbowMane(b, H, t){
+  const r = b.headR;
+  for (let i=0;i<7;i++){
+    const a = headAnchor(b, -r*0.2 + i*r*0.1, -r*0.55 + i*r*0.16);
+    const c = { x: lerp(b.neck.x, b.pelvis.x, .18) + Math.sin(t*2 + i)*b.sw*0.10,
+                y: lerp(b.neck.y, b.pelvis.y, .18) + i*b.sw*0.04 };
+    ctx.save(); ctx.strokeStyle = RAINBOW[i]; ctx.lineWidth = b.sw*0.13; ctx.lineCap='round';
+    ctx.beginPath(); ctx.moveTo(a.x, a.y);
+    ctx.quadraticCurveTo(lerp(a.x,c.x,.5) + Math.sin(t*3+i)*b.sw*0.12, lerp(a.y,c.y,.5), c.x, c.y);
+    ctx.stroke(); ctx.restore();
+  }
+}
+
+// spiked ridge down the spine (dino)
+function drawRidge(b, H, t){
+  const n = 7;
+  ctx.save();
+  for (let i=0;i<n;i++){
+    const u = i/(n-1);
+    const base = { x: lerp(b.neck.x, b.pelvis.x, u), y: lerp(b.neck.y, b.pelvis.y, u) };
+    const size = b.sw*(0.30 - Math.abs(u-0.35)*0.22);
+    const a2 = b.tilt;
+    ctx.beginPath();
+    ctx.moveTo(base.x - Math.cos(a2)*size*0.5, base.y - Math.sin(a2)*size*0.5);
+    ctx.lineTo(base.x + Math.cos(a2 - Math.PI/2)*size*1.5, base.y + Math.sin(a2 - Math.PI/2)*size*1.5);
+    ctx.lineTo(base.x + Math.cos(a2)*size*0.5, base.y + Math.sin(a2)*size*0.5);
+    ctx.closePath();
+    ctx.fillStyle = H.secondary; ctx.fill();
+    ctx.strokeStyle = H.outline; ctx.lineWidth = H.line*0.8; ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// eight tentacles, each its own rope with its own wind
+function drawTentacles(b, H, dt, t){
+  const n = H.tentacles, sw = b.sw;
+  for (let i=0;i<n;i++){
+    const u = (i/(n-1) - 0.5);
+    const R = rope('tent'+i, 8);
+    const anchor = { x: b.pelvis.x + u*sw*1.5, y: b.pelvis.y + sw*0.15 + Math.abs(u)*sw*0.1 };
+    stepRope(R, anchor, sw*0.30, dt, 900, Math.sin(t*2.4 + i*1.1)*3400 + u*1200);
+    ropeChain(R, H, sw*0.17, sw*0.05, i%2 ? H.primary : H.dark);
+    ctx.save();                                  // suckers
+    ctx.fillStyle = H.accent; ctx.globalAlpha = .8;
+    for (let k=2;k<R.length;k+=2){
+      ctx.beginPath(); ctx.arc(R[k].x, R[k].y, sw*0.045, 0, TAU); ctx.fill();
+    }
+    ctx.restore();
+  }
+}
+
+// rainbow ribbon that follows the hands
+const trailPts = [];
+function pushTrail(b){
+  trailPts.push({ x:b.wrR.x, y:b.wrR.y, life:1 }, { x:b.wrL.x, y:b.wrL.y, life:1, alt:true });
+  while (trailPts.length > 120) trailPts.shift();
+}
+function drawTrail(dt){
+  for (const p of trailPts) p.life -= dt*0.7;
+  for (let i=trailPts.length-1;i>=0;i--) if (trailPts[i].life <= 0) trailPts.splice(i,1);
+  for (const alt of [false, true]){
+    const pts = trailPts.filter(p => !!p.alt === alt);
+    if (pts.length < 3) continue;
+    for (let i=1;i<pts.length;i++){
+      ctx.save();
+      ctx.globalAlpha = clamp(pts[i].life, 0, 1)*0.85;
+      ctx.strokeStyle = RAINBOW[i % RAINBOW.length];
+      ctx.lineWidth = 14*clamp(pts[i].life,0,1) + 3; ctx.lineCap = 'round';
+      ctx.shadowBlur = 16; ctx.shadowColor = ctx.strokeStyle;
+      ctx.beginPath(); ctx.moveTo(pts[i-1].x, pts[i-1].y); ctx.lineTo(pts[i].x, pts[i].y); ctx.stroke();
+      ctx.restore();
+    }
+  }
+}
+
+// expanding shockwave rings (roar, stomp)
+const rings = [];
+function addRing(x, y, color, max){ rings.push({ x, y, r: 10, max, life: 1, color }); }
+function stepRings(dt){
+  for (const r of rings){ r.r += (r.max - r.r)*dt*3.2; r.life -= dt*0.9; }
+  for (let i=rings.length-1;i>=0;i--) if (rings[i].life <= 0) rings.splice(i,1);
+}
+function drawRings(){
+  for (const r of rings){
+    ctx.save(); ctx.globalAlpha = clamp(r.life,0,1)*0.7;
+    ctx.strokeStyle = r.color; ctx.lineWidth = 10*clamp(r.life,0,1) + 2;
+    ctx.shadowBlur = 22; ctx.shadowColor = r.color;
+    ctx.beginPath(); ctx.arc(r.x, r.y, r.r, 0, TAU); ctx.stroke(); ctx.restore();
+  }
+}
+
+
+/* ==========================================================================
+   MORE PARTS — stripes, frills, plates, bat wings, bubble helmet, mer-tail
+   ========================================================================== */
+function stripeCapsule(a, b2, r0, r1, H, count, color){
+  ctx.save(); capsulePath(a, b2, r0, r1); ctx.clip();
+  ctx.strokeStyle = color; ctx.lineCap = 'butt';
+  const th = ang(a, b2) + Math.PI/2;
+  for (let i=1;i<=count;i++){
+    const u = i/(count+1);
+    const px2 = lerp(a.x,b2.x,u), py = lerp(a.y,b2.y,u), rr = lerp(r0,r1,u)*1.4;
+    ctx.lineWidth = rr*0.34;
+    ctx.beginPath();
+    ctx.moveTo(px2 + Math.cos(th)*rr, py + Math.sin(th)*rr);
+    ctx.lineTo(px2 - Math.cos(th)*rr, py - Math.sin(th)*rr);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+function drawStripes(b, H, R){
+  const c = H.stripeColor || H.outline;
+  ctx.save(); torsoPath(b, 1); ctx.clip();
+  ctx.strokeStyle = c; ctx.lineCap='round';
+  for (let i=0;i<5;i++){
+    const u = .18 + i*.16, y = lerp(b.neck.y, b.pelvis.y, u), x = lerp(b.neck.x, b.pelvis.x, u);
+    ctx.lineWidth = b.sw*0.10;
+    ctx.beginPath();
+    ctx.moveTo(x - b.sw*0.9, y - b.sw*0.10);
+    ctx.quadraticCurveTo(x, y + b.sw*0.14, x + b.sw*0.9, y - b.sw*0.10);
+    ctx.stroke();
+  }
+  ctx.restore();
+  stripeCapsule(b.shL, b.elL, R.upper, R.elbow, H, 3, c);
+  stripeCapsule(b.shR, b.elR, R.upper, R.elbow, H, 3, c);
+  stripeCapsule(b.hipL, b.knL, R.thigh, R.knee, H, 3, c);
+  stripeCapsule(b.hipR, b.knR, R.thigh, R.knee, H, 3, c);
+}
+
+// pale belly patch (penguin, shark)
+function drawBelly(b, H){
+  ctx.save(); torsoPath(b, 1); ctx.clip();
+  const c = { x: lerp(b.neck.x, b.pelvis.x, .55), y: lerp(b.neck.y, b.pelvis.y, .55) };
+  ctx.beginPath(); ctx.ellipse(c.x, c.y, b.sw*0.62, b.torsoLen*0.48, b.tilt, 0, TAU);
+  ctx.fillStyle = H.belly || H.accent; ctx.fill();
+  ctx.restore();
+}
+
+function drawBeak(b, H, kind = 'beak'){
+  const r = b.headR, a = headAnchor(b, 0, r*0.62);
+  ctx.save(); ctx.translate(a.x, a.y); ctx.rotate(b.headAng);
+  ctx.beginPath();
+  if (kind === 'snout'){
+    ctx.moveTo(-r*0.62, -r*0.12); ctx.quadraticCurveTo(0, r*0.70, r*0.62, -r*0.12); ctx.closePath();
+    ctx.fillStyle = H.secondary; ctx.fill();
+    ctx.strokeStyle = '#FFFFFF'; ctx.lineWidth = r*0.10;
+    ctx.beginPath();
+    for (let i=-3;i<=3;i++){ ctx.moveTo(i*r*0.16, 0); ctx.lineTo(i*r*0.16 + r*0.06, r*0.20); }
+    ctx.stroke();
+  } else {
+    ctx.moveTo(-r*0.34, 0); ctx.lineTo(0, r*0.62); ctx.lineTo(r*0.34, 0); ctx.closePath();
+    ctx.fillStyle = H.beakColor || '#FFA83D'; ctx.fill();
+    ctx.strokeStyle = H.outline; ctx.lineWidth = H.line*0.7; ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// neck frill (triceratops)
+function drawFrill(b, H){
+  const r = b.headR;
+  ctx.save(); ctx.translate(b.headC.x, b.headC.y); ctx.rotate(b.headAng);
+  const R2 = r*1.95, n = 9;
+  ctx.beginPath(); ctx.moveTo(-R2*0.75, r*0.45);
+  for (let i=0;i<=n;i++){
+    const a2 = Math.PI + i/n*Math.PI;
+    const bump = (i%2 ? 1.12 : 0.98);
+    ctx.lineTo(Math.cos(a2)*R2*bump, Math.sin(a2)*R2*bump + r*0.2);
+  }
+  ctx.closePath();
+  const g = ctx.createLinearGradient(0, -R2, 0, r);
+  g.addColorStop(0, H.light); g.addColorStop(1, H.dark);
+  ctx.fillStyle = g; ctx.fill();
+  ctx.strokeStyle = H.outline; ctx.lineWidth = H.line*1.1; ctx.stroke();
+  ctx.restore();
+}
+function drawHorns3(b, H){
+  const r = b.headR;
+  const horn = (dx, dy, size, lean) => {
+    const a = headAnchor(b, dx, dy);
+    ctx.save(); ctx.translate(a.x, a.y); ctx.rotate(b.headAng + lean);
+    ctx.beginPath(); ctx.moveTo(-size*0.3, 0); ctx.lineTo(0, -size*1.6); ctx.lineTo(size*0.3, 0); ctx.closePath();
+    ctx.fillStyle = H.accent; ctx.fill(); ctx.strokeStyle = H.outline; ctx.lineWidth = H.line*0.7; ctx.stroke();
+    ctx.restore();
+  };
+  horn(-r*0.55, -r*0.75, r*0.42, -0.25);
+  horn( r*0.55, -r*0.75, r*0.42,  0.25);
+  horn(0, r*0.30, r*0.30, 0);
+}
+
+// staggered back plates (stegosaurus)
+function drawPlates(b, H){
+  const n = 6;
+  for (let i=0;i<n;i++){
+    const u = i/(n-1);
+    const base = { x: lerp(b.neck.x, b.pelvis.x, u), y: lerp(b.neck.y, b.pelvis.y, u) };
+    const size = b.sw*(0.42 - Math.abs(u-0.45)*0.30);
+    const off = (i%2 ? 1 : -1)*b.sw*0.14;
+    ctx.save();
+    ctx.translate(base.x + Math.cos(b.tilt)*off, base.y + Math.sin(b.tilt)*off);
+    ctx.rotate(b.tilt);
+    ctx.beginPath(); ctx.ellipse(0, -size*0.9, size*0.62, size, 0, 0, TAU);
+    ctx.fillStyle = H.secondary; ctx.fill();
+    ctx.strokeStyle = H.outline; ctx.lineWidth = H.line*0.8; ctx.stroke();
+    ctx.restore();
+  }
+}
+
+function drawBatWings(b, H, t){
+  const flap = Math.sin(t*5)*0.30, sw = b.sw;
+  for (const side of [-1, 1]){
+    const root = { x: lerp(b.neck.x, b.pelvis.x, .12) + side*sw*0.38, y: lerp(b.neck.y, b.pelvis.y, .12) };
+    ctx.save(); ctx.translate(root.x, root.y); ctx.rotate(b.tilt + side*(0.5 + flap));
+    const L = sw*2.5;
+    ctx.beginPath(); ctx.moveTo(0, 0);
+    ctx.quadraticCurveTo(side*L*0.5, -L*0.55, side*L, -L*0.15);
+    ctx.quadraticCurveTo(side*L*0.72, L*0.12, side*L*0.62, L*0.34);
+    ctx.quadraticCurveTo(side*L*0.46, L*0.10, side*L*0.34, L*0.44);
+    ctx.quadraticCurveTo(side*L*0.22, L*0.16, side*L*0.10, L*0.46);
+    ctx.closePath();
+    const g = ctx.createLinearGradient(0, -L*0.4, side*L, L*0.4);
+    g.addColorStop(0, H.wingColor || H.dark); g.addColorStop(1, H.secondary);
+    ctx.fillStyle = g; ctx.fill();
+    ctx.strokeStyle = H.outline; ctx.lineWidth = H.line; ctx.lineJoin='round'; ctx.stroke();
+    ctx.strokeStyle = H.outline; ctx.lineWidth = H.line*0.7; ctx.globalAlpha = .7;
+    for (const f of [.34, .62, 1]){
+      ctx.beginPath(); ctx.moveTo(0,0);
+      ctx.quadraticCurveTo(side*L*f*0.5, -L*0.25*f, side*L*f, L*0.42*f - L*0.28*f);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
+
+function drawCrown(b, H, t){
+  const r = b.headR;
+  for (let i=0;i<7;i++){
+    const u = i/6, a2 = Math.PI + u*Math.PI;
+    const c = headAnchor(b, Math.cos(a2)*r*0.95, Math.sin(a2)*r*1.05 - r*0.15);
+    ctx.save(); ctx.translate(c.x, c.y); ctx.rotate(t*0.6 + i);
+    for (let k=0;k<5;k++){
+      const pa = k/5*TAU;
+      ctx.beginPath(); ctx.ellipse(Math.cos(pa)*r*0.16, Math.sin(pa)*r*0.16, r*0.11, r*0.15, pa, 0, TAU);
+      ctx.fillStyle = ['#FFB3EC','#FFF3C4','#B3E5FF','#D6C7F0'][i%4]; ctx.fill();
+    }
+    ctx.beginPath(); ctx.arc(0,0,r*0.09,0,TAU); ctx.fillStyle = '#FFF3C4'; ctx.fill();
+    ctx.restore();
+  }
+}
+
+// merged legs (mermaid): follows the real legs, ends in a fin
+function drawMerTail(b, H, t){
+  const kn = mid(b.knL, b.knR), an = mid(b.anL, b.anR);
+  const sw = b.sw;
+  limb(b.pelvis, kn, sw*0.62, sw*0.46, H, { color:H.primary, shine:true });
+  limb(kn, an, sw*0.46, sw*0.22, H, { color:H.primary, shine:true });
+  ctx.save();
+  const a2 = ang(kn, an), fin = sw*1.15, wob = Math.sin(t*3)*0.22;
+  ctx.translate(an.x, an.y); ctx.rotate(a2 - Math.PI/2 + wob);
+  for (const side of [-1, 1]){
+    ctx.beginPath(); ctx.moveTo(0, -sw*0.1);
+    ctx.quadraticCurveTo(side*fin*0.9, fin*0.15, side*fin*0.75, fin*0.95);
+    ctx.quadraticCurveTo(side*fin*0.25, fin*0.5, 0, fin*0.4);
+    ctx.closePath();
+    const g = ctx.createLinearGradient(0, 0, side*fin, fin);
+    g.addColorStop(0, H.secondary); g.addColorStop(1, H.accent);
+    ctx.fillStyle = g; ctx.fill();
+    ctx.strokeStyle = H.outline; ctx.lineWidth = H.line; ctx.stroke();
+  }
+  ctx.restore();
+  ctx.save();                                     // scale shimmer
+  capsulePath(b.pelvis, kn, sw*0.62, sw*0.46); ctx.clip();
+  ctx.globalAlpha = .35; ctx.fillStyle = H.accent;
+  for (let i=0;i<14;i++){
+    const u = (i%7)/7, v = Math.floor(i/7)/2;
+    const x = lerp(b.pelvis.x, kn.x, u) + (v-0.25)*sw*0.6, y = lerp(b.pelvis.y, kn.y, u);
+    ctx.beginPath(); ctx.arc(x, y, sw*0.13, 0, TAU); ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawDorsalFin(b, H){
+  const base = { x: lerp(b.neck.x, b.pelvis.x, .35), y: lerp(b.neck.y, b.pelvis.y, .35) };
+  ctx.save(); ctx.translate(base.x, base.y); ctx.rotate(b.tilt);
+  ctx.beginPath(); ctx.moveTo(-b.sw*0.5, 0);
+  ctx.quadraticCurveTo(-b.sw*0.1, -b.sw*1.5, b.sw*0.55, -b.sw*0.05);
+  ctx.closePath();
+  ctx.fillStyle = H.dark; ctx.fill(); ctx.strokeStyle = H.outline; ctx.lineWidth = H.line; ctx.stroke();
+  ctx.restore();
+}
+
+function drawBackpack(b, H){
+  const c = { x: lerp(b.neck.x, b.pelvis.x, .30), y: lerp(b.neck.y, b.pelvis.y, .30) };
+  ctx.save(); ctx.translate(c.x, c.y); ctx.rotate(b.tilt);
+  ctx.beginPath(); ctx.roundRect(-b.sw*0.62, -b.sw*0.5, b.sw*1.24, b.sw*1.15, b.sw*0.24);
+  ctx.fillStyle = H.secondary; ctx.fill(); ctx.strokeStyle = H.outline; ctx.lineWidth = H.line; ctx.stroke();
+  ctx.beginPath(); ctx.arc(0, b.sw*0.18, b.sw*0.16, 0, TAU);
+  ctx.fillStyle = H.glow; ctx.fill();
+  ctx.restore();
+}
+
+// clear bubble helmet: his whole face stays visible through it
+function drawBubbleHelmet(b, H){
+  const r = b.headR*1.55;
+  ctx.save();
+  ctx.beginPath(); ctx.arc(b.headC.x, b.headC.y, r, 0, TAU);
+  const g = ctx.createRadialGradient(b.headC.x - r*0.35, b.headC.y - r*0.4, r*0.1, b.headC.x, b.headC.y, r);
+  g.addColorStop(0, 'rgba(255,255,255,.30)'); g.addColorStop(.7, 'rgba(180,220,255,.10)');
+  g.addColorStop(1, 'rgba(140,190,255,.28)');
+  ctx.fillStyle = g; ctx.fill();
+  ctx.strokeStyle = H.accent; ctx.lineWidth = H.line*1.6; ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,255,255,.85)'; ctx.lineWidth = H.line*1.2;
+  ctx.beginPath(); ctx.arc(b.headC.x, b.headC.y, r*0.82, Math.PI*1.05, Math.PI*1.45); ctx.stroke();
+  ctx.beginPath(); ctx.arc(b.headC.x, b.headC.y, r, Math.PI*0.15, Math.PI*0.85);
+  ctx.strokeStyle = H.secondary; ctx.lineWidth = H.line*2.4; ctx.stroke();
+  ctx.restore();
+}
+
+/* ==========================================================================
+   UI + MAIN LOOP
+   ========================================================================== */
+const railHTML = (fam, label) => `<div class="railtag">${label}</div>` + HEROES.map((h,i) => ({h,i}))
+  .filter(({h}) => (h.family || 'hero') === fam).map(({h,i}) => `
+  <button class="hero" data-i="${i}" aria-pressed="${i===0}"
+          style="background:linear-gradient(150deg,${h.light},${h.primary} 55%,${h.dark})">
+    <div class="e">${h.emoji}</div>${h.name}
+  </button>`).join('');
+$('rail').innerHTML = [['hero','HEROES'],['animal','ANIMALS'],['dino','DINOS'],
+                       ['magic','MAGIC'],['sea','SEA'],['space','SPACE']]
+  .map(([f,l]) => railHTML(f, l)).join('');
+
+function pickHero(i){
+  A.heroIdx = (i + HEROES.length) % HEROES.length;
+  for (const el of $('rail').querySelectorAll?.('.hero') || [])
+    el.setAttribute('aria-pressed', String(+el.dataset.i === A.heroIdx));
+  resetRopes(); trailPts.length = 0; rings.length = 0;
+  const H = HEROES[A.heroIdx];
+  A.flashMsg = H.emoji; A.flashT = 1.2;
+  audio.whoosh(); audio.blip(520, .18, 'triangle', .1);
+  for (let i2=0;i2<26;i2++) bits.push({ x: innerWidth/2, y: innerHeight/2, vx: rnd(-420,420), vy: rnd(-420,420),
+    life:1, decay:1.2, color:H.glow, r: rnd(4,11), kind:'star', spin: rnd(-5,5), a:0 });
+  $('rail').querySelector?.(`.hero[data-i="${A.heroIdx}"]`)?.scrollIntoView?.({ behavior:'smooth', block:'nearest', inline:'center' });
+}
+$('rail').addEventListener('click', e => {
+  const b = e.target.closest('.hero'); if (b) pickHero(+b.dataset.i);
+});
+
+$('bShuffle').addEventListener('click', () => pickHero(A.heroIdx + 1 + Math.floor(Math.random()*(HEROES.length-1))));
+$('bSparkle').addEventListener('click', () => { A.sparkles = !A.sparkles; $('bSparkle').setAttribute('aria-pressed', String(A.sparkles)); });
+$('bMusic').addEventListener('click', () => { A.music = !A.music; audio.ready(); $('bMusic').setAttribute('aria-pressed', String(A.music)); });
+$('bCam').addEventListener('click', async () => {
+  if (A.mode === 'camera'){ A.mode = 'demo'; $('bCam').setAttribute('aria-pressed','false'); }
+  else await startCamera();
+});
+$('bPhoto').addEventListener('click', () => {
+  try {
+    const a = document.createElement('a');
+    a.download = `hero-${HEROES[A.heroIdx].id}-${Date.now()}.png`;
+    a.href = canvas.toDataURL('image/png');
+    a.click();
+    A.flashMsg = '📸'; A.flashT = 1;
+  } catch(e){ console.warn('[photo]', e); }
+});
+
+$('bGo').addEventListener('click', async () => { audio.ready(); A.music = true; $('bMusic').setAttribute('aria-pressed','true'); await startCamera(); });
+$('bRetry').addEventListener('click', startCamera);
+const goDemo = () => { audio.ready(); A.mode = 'demo'; A.started = true; A.music = true;
+  $('bMusic').setAttribute('aria-pressed','true'); $('screens').classList.add('hidden'); };
+$('bDemo').addEventListener('click', goDemo);
+$('bErrDemo').addEventListener('click', goDemo);
+
+/* ---------- backdrop ---------- */
+const stars = Array.from({length:70}, () => ({ x:Math.random(), y:Math.random(), r:Math.random()*2+.5, tw:Math.random()*TAU }));
+function drawBackdrop(H, t){
+  const g = ctx.createLinearGradient(0,0,0,innerHeight);
+  g.addColorStop(0, '#070C24'); g.addColorStop(.55, '#141B4A'); g.addColorStop(1, H.dark);
+  ctx.fillStyle = g; ctx.fillRect(0,0,innerWidth,innerHeight);
+  for (const s of stars){
+    ctx.globalAlpha = .35 + Math.sin(t*2 + s.tw)*.3;
+    ctx.fillStyle = '#FFF6EA';
+    ctx.fillRect(s.x*innerWidth, s.y*innerHeight*0.8, s.r, s.r);
+  }
+  ctx.globalAlpha = 1;
+  if (A.mode === 'camera' && video.readyState >= 2){
+    ctx.save(); ctx.translate(stage.x+stage.w, stage.y); ctx.scale(-1,1);
+    ctx.globalAlpha = .62; ctx.drawImage(video, 0, 0, stage.w, stage.h);
+    ctx.restore(); ctx.globalAlpha = 1;
+  }
+  // floor glow so the hero feels planted
+  const fg = ctx.createRadialGradient(innerWidth/2, stage.y+stage.h, 10, innerWidth/2, stage.y+stage.h, stage.w*0.5);
+  fg.addColorStop(0, H.primary + '55'); fg.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = fg; ctx.fillRect(0, stage.y+stage.h*0.6, innerWidth, stage.h*0.4);
+}
+
+function drawFlash(t){
+  if (A.flashT <= 0) return;
+  const k = A.flashT;
+  ctx.save();
+  ctx.globalAlpha = clamp(k, 0, 1);
+  ctx.translate(innerWidth/2, stage.y + stage.h*0.22);
+  const s = 1 + (1.2 - k)*0.9;
+  ctx.scale(s, s); ctx.rotate(Math.sin(t*8)*0.08);
+  ctx.font = '700 92px Fredoka, system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(A.flashMsg, 0, 0);
+  ctx.restore();
+}
+
+let last = performance.now();
+function frame(now){
+  requestAnimationFrame(frame);
+  const dt = Math.min(0.05, (now-last)/1000); last = now;
+  A.t += dt;
+  const H = HEROES[A.heroIdx];
+
+  drawBackdrop(H, A.t);
+
+  const shake = A.shake || 0;
+  if (shake > 0){ ctx.save(); ctx.translate(rnd(-shake,shake), rnd(-shake,shake)); A.shake = Math.max(0, shake - dt*40); }
+
+  const body = A.mode === 'camera' ? A.body : puppetBody(A.t);
+  if (H.fx === 'rainbow') drawTrail(dt);
+  if (body){
+    try {
+      drawHero(body, H, dt, A.t);
+      effects(body, H, dt, A.t);
+    } catch(e){ console.error('[draw]', e); A.lastError = e.message; }
+  } else if (A.started){
+    ctx.save();
+    ctx.font = '700 30px Fredoka, system-ui'; ctx.textAlign='center'; ctx.fillStyle = '#FFC93C';
+    ctx.fillText(A.fps ? '👋 step back so I can see you!' : '⏳ getting ready…', innerWidth/2, stage.y+stage.h/2);
+    ctx.restore();
+  }
+
+  stepRings(dt); drawRings();
+  stepBits(dt); drawBits();
+  if (shake > 0) ctx.restore();
+  if (A.flashT > 0){ A.flashT -= dt; drawFlash(A.t); }
+
+  if (A.mode === 'camera'){
+    ctx.save();
+    ctx.fillStyle = A.body ? '#63FFC9' : '#FF63A5';
+    ctx.beginPath(); ctx.arc(stage.x + stage.w - 18, stage.y + 16, 6, 0, TAU); ctx.fill();
+    ctx.restore();
+  }
+}
+layout(); pickHero(0); requestAnimationFrame(frame);
+console.info('[hero suit] ready ·', HEROES.length, 'suits');
+</script>
+</body>
+</html>

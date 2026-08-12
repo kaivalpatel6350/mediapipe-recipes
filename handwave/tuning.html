@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Tuning — Handwave</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;800&family=IBM+Plex+Sans:wght@300;400;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="bar">
+  <div class="bar-inner">
+    <a class="wordmark" href="index.html">Handwave</a>
+    <nav><a href="index.html">Wave to begin</a><a href="tracking.html">How it reads a hand</a><a href="tuning.html" aria-current='page'>Tuning</a><a href="running.html">Running it</a></nav>
+  </div>
+  <div id="progress"></div>
+</header>
+<main>
+<section>
+  <div class="eyebrow">03 — Tuning</div>
+  <h1>Four numbers do all the work.</h1>
+  <p class="lede">They sit at the top of <span class="mono">assets/gesture.js</span>. Change one at a time and reload — the interaction changes character fast.</p>
+</section>
+
+<section>
+  <h2>PINCH_RATIO — 0.38</h2>
+  <p>How close thumb and index have to be, as a fraction of palm width. Lower it if the page grabs when you did not mean to pinch. Raise it if you are squeezing hard and nothing happens. Around 0.30 the gesture becomes a firm deliberate pinch, and past 0.50 a loosely cupped hand starts registering.</p>
+</section>
+
+<section>
+  <h2>SCROLL_GAIN — 2600</h2>
+  <p>Pixels of scroll per unit of hand travel, where one unit is the full height of the camera frame. At 2600 a comfortable hand movement of roughly a third of the frame moves you about 900 pixels, which is a screen or so. This is the number people re-tune the most, and it is pure feel — there is no correct answer, only what stops you reaching.</p>
+  <p>If you have long pages and a small camera frame, raise it. If precise stopping matters more than covering ground, lower it.</p>
+</section>
+
+<section>
+  <h2>SWIPE_SPEED — 1.15</h2>
+  <p>Frame widths per second the wrist must exceed to count as a flick. Raise it and only sharp intentional swipes register, which is the right call if you gesture a lot while talking. Lower it and gentle sweeps work, at the cost of the occasional accidental page change.</p>
+</section>
+
+<section>
+  <h2>COOLDOWN — 1100 ms</h2>
+  <p>How long swipes are ignored after one fires. It has to outlast both the tail of your hand movement and the page transition, or the second page inherits the momentum of the first swipe. If double-jumps happen, this is the number to raise before touching anything else.</p>
+</section>
+
+<section>
+  <h2>A tuning order that works.</h2>
+  <p>Start with the pinch threshold, because everything else is harder to judge while the grab is unreliable. Then set the scroll gain by reading a real page rather than a test pattern. Then the swipe speed, deliberately trying to trigger it by accident. The cooldown comes last and usually needs no change at all.</p>
+  <p>Whatever you land on, tune it in the light you will actually use it in. Detection confidence drops in a dim room, landmarks get noisier, and thresholds that felt crisp at midday go vague by evening.</p>
+</section>
+<a class="next" href="running.html">Running it &nbsp;→</a>
+</main>
+<script type="module" src="assets/gesture.js"></script>
+</body>
+</html>

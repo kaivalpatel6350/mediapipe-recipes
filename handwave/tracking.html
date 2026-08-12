@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>How it reads a hand — Handwave</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;800&family=IBM+Plex+Sans:wght@300;400;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="bar">
+  <div class="bar-inner">
+    <a class="wordmark" href="index.html">Handwave</a>
+    <nav><a href="index.html">Wave to begin</a><a href="tracking.html" aria-current='page'>How it reads a hand</a><a href="tuning.html">Tuning</a><a href="running.html">Running it</a></nav>
+  </div>
+  <div id="progress"></div>
+</header>
+<main>
+<section>
+  <div class="eyebrow">02 — How it reads a hand</div>
+  <h1>Twenty-one points, thirty times a second.</h1>
+  <p class="lede">MediaPipe returns 21 landmarks per hand, each with x, y and a relative depth. Every gesture on this site is a handful of distances between them.</p>
+</section>
+
+<section>
+  <h2>The landmark layout.</h2>
+  <p>Point 0 is the wrist. Each finger runs outward in four points: base knuckle, two joints, then the tip. Index is 5 through 8, middle 9 through 12, ring 13 through 16, pinky 17 through 20, and the thumb is 1 through 4. Coordinates come back normalized to the frame, so 0.5 is the middle regardless of resolution.</p>
+  <p>The preview is mirrored so it behaves like a mirror rather than a photograph, which means x has to be flipped before it is used for anything directional. Otherwise moving right sends you backwards, and it is surprisingly hard to notice why.</p>
+</section>
+
+<section>
+  <h2>Is a finger extended?</h2>
+  <p>Compare the tip against the joint two below it. If the tip sits higher in the frame than that joint, the finger is up. Repeat for four fingers and count. The thumb needs its own test, because it folds sideways rather than down: compare how far the tip and the joint below it sit from the outer edge of the palm.</p>
+  <pre>function fingersUp(lm){
+  let n = 0;
+  [[8,6],[12,10],[16,14],[20,18]].forEach(([tip, pip]) =&gt; {
+    if (lm[tip].y &lt; lm[pip].y) n++;
+  });
+  if (Math.abs(lm[4].x - lm[17].x) &gt; Math.abs(lm[3].x - lm[17].x)) n++;
+  return n;
+}</pre>
+  <p>Four or more counts as an open palm. Requiring all five makes the gesture brittle, because the pinky is the first thing to curl when you move quickly.</p>
+</section>
+
+<section>
+  <h2>Is it a pinch?</h2>
+  <p>Measure the distance from thumb tip to index tip, then divide by the distance from wrist to middle-finger knuckle. That second number is a decent proxy for how large your hand appears, so the ratio stays roughly constant as you move toward or away from the camera. Below the threshold, the pinch is closed.</p>
+  <pre>const palm  = dist(lm[0], lm[9]);
+const pinch = dist(lm[4], lm[8]) / palm &lt; PINCH_RATIO;</pre>
+</section>
+
+<section>
+  <h2>Smoothing, and the trap in it.</h2>
+  <p>Raw landmarks jitter by a pixel or two even when your hand is still, which reads as a slow drift when multiplied by the scroll gain. An exponential moving average fixes it: keep a smoothed position, and each frame move it halfway toward the new reading.</p>
+  <p>The trap is what you compare against afterwards. Subtracting the smoothed value from the raw one gives you the smoothing error, not the movement. The delta you actually want is between this frame's smoothed value and the previous frame's smoothed value, so the previous value has to be captured before the update overwrites it.</p>
+  <pre>const prev = sy;
+sy = prev === null ? y : prev + (y - prev) * 0.5;
+const dy = prev === null ? 0 : sy - prev;   // the real movement</pre>
+</section>
+
+<section>
+  <h2>Velocity and the cooldown.</h2>
+  <p>Horizontal velocity is the smoothed x delta divided by elapsed seconds, which makes the threshold independent of frame rate. Above the threshold with an open palm, the page changes and a cooldown starts. Without that lockout a single flick fires two or three times, because your hand is still travelling fast in the frames right after the trigger.</p>
+  <p>One more detail: reset the smoothed position to null whenever the hand leaves the frame. Otherwise your hand reappears somewhere new and the first delta is enormous, which lurches the page.</p>
+</section>
+<a class="next" href="tuning.html">Tuning &nbsp;→</a>
+</main>
+<script type="module" src="assets/gesture.js"></script>
+</body>
+</html>
