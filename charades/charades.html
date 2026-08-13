@@ -1,0 +1,882 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Charades — the AI guesses you</title>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0B0F1E; --panel:#141A32; --line:#2A3454; --ink:#F0F3FF; --dim:#8E9ABF;
+  --hot:#FF5C8A; --lime:#5BE39A; --gold:#FFC93C; --cyan:#43D9FF;
+  --f:'Fredoka',system-ui,sans-serif; --m:'IBM Plex Mono',ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--ink);font-family:var(--f)}
+canvas#stage{position:fixed;inset:0;width:100%;height:100%}
+video#cam{position:fixed;top:0;left:0;width:2px;height:2px;opacity:0;pointer-events:none}
+
+/* ---------- side panel: guesses + motion log ---------- */
+#side{position:fixed;top:0;right:0;bottom:0;width:min(360px,34vw);background:rgba(20,26,50,.9);
+  backdrop-filter:blur(14px);border-left:1px solid var(--line);display:flex;flex-direction:column;z-index:8}
+#side.hidden{display:none}
+#side h4{margin:0;padding:12px 16px;font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--dim);
+  border-bottom:1px solid var(--line)}
+#guesses{flex:1 1 60%;overflow-y:auto;padding:12px 14px;display:flex;flex-direction:column;gap:10px}
+#log{flex:1 1 40%;overflow-y:auto;padding:10px 14px;font-family:var(--m);font-size:11.5px;color:#9FB0DA;
+  line-height:1.55;border-top:1px solid var(--line);white-space:pre-wrap}
+.bubble{background:#1D2542;border:1px solid var(--line);border-radius:14px 14px 14px 4px;padding:10px 13px;font-size:15px}
+.bubble .g{font-weight:600;color:var(--gold);font-size:17px}
+.bubble .alt{color:var(--dim);font-size:13px;margin-top:3px}
+.bubble .say{color:var(--cyan);font-size:13.5px;margin-top:6px;font-style:italic}
+.bubble.hit{border-color:var(--lime);background:#16351F}
+.bubble.err{border-color:var(--hot);color:#FFC2D3}
+
+/* ---------- screens ---------- */
+#screens{position:fixed;inset:0;display:grid;place-items:center;padding:20px;z-index:20;overflow:auto}
+#screens.hidden{display:none}
+.card{width:min(660px,94vw);background:var(--panel);border:2px solid var(--line);border-radius:26px;padding:26px}
+.card.hidden{display:none}
+h1{font-size:clamp(32px,6vw,54px);line-height:.95;margin:.1em 0 .3em}
+h1 em{font-style:normal;color:var(--gold)}
+p{color:#C3CCEA;font-size:15px;line-height:1.6;margin:8px 0}
+label{display:block;font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim);margin:14px 0 6px}
+input,select{width:100%;background:#0E1428;border:2px solid var(--line);border-radius:12px;padding:12px 14px;
+  color:var(--ink);font-family:var(--m);font-size:13px}
+input:focus,select:focus{outline:none;border-color:var(--cyan)}
+.row{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px;align-items:center}
+button{font-family:var(--f);font-weight:600;font-size:17px;border:0;border-radius:999px;padding:14px 26px;
+  background:var(--gold);color:#12172B;cursor:pointer}
+button.ghost{background:transparent;color:var(--ink);border:2px solid var(--line)}
+button.ghost[aria-pressed="true"]{background:var(--lime);color:#12172B;border-color:var(--lime)}
+button:disabled{opacity:.45;cursor:default}
+.warn{font-size:12.5px;color:var(--gold);background:rgba(255,201,60,.1);border:1px solid rgba(255,201,60,.3);
+  border-radius:12px;padding:10px 13px;margin-top:12px;line-height:1.5}
+.err{font-size:13px;color:#FFC2D3;background:rgba(255,92,138,.1);border:1px solid rgba(255,92,138,.35);
+  border-radius:12px;padding:12px 14px;margin-top:12px;line-height:1.55;font-family:var(--m);white-space:pre-wrap}
+code{font-family:var(--m);font-size:12px;color:var(--cyan)}
+.stats{display:flex;gap:12px;flex-wrap:wrap;margin:16px 0}
+.stat{background:#1B2240;border-radius:14px;padding:12px 18px;min-width:110px}
+.stat span{display:block;font-size:26px;color:var(--gold)}
+.stat small{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim)}
+#top{position:fixed;top:12px;left:12px;display:flex;gap:8px;z-index:9}
+#top button{font-size:13px;padding:8px 14px;background:rgba(20,26,50,.85);color:var(--ink);border:1px solid var(--line)}
+#top.hidden{display:none}
+@media (max-width:720px){ #side{width:100%;height:44vh;top:auto;bottom:0;border-left:0;border-top:1px solid var(--line)} }
+</style>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<video id="cam" playsinline muted></video>
+
+<div id="top" class="hidden">
+  <button id="bQuit">‹ Menu</button>
+  <button id="bSkip">Skip word</button>
+  <button id="bHint">Give hint (−20)</button>
+  <button id="bVoice" aria-pressed="true">🔊</button>
+</div>
+
+<div id="side" class="hidden">
+  <h4>AI guesses</h4>
+  <div id="guesses"></div>
+  <h4>What the camera sees</h4>
+  <div id="log"></div>
+</div>
+
+<div id="screens">
+  <div class="card" id="cSetup">
+    <div style="font-size:11px;letter-spacing:.24em;text-transform:uppercase;color:var(--cyan)">Body in, guesses out</div>
+    <h1>CHARADES <em>vs AI</em></h1>
+    <p>You act it out. A language model watches a written description of your movements and tries to guess what you are doing — out loud, while you flail.</p>
+
+    <label for="provider">Provider</label>
+    <select id="provider">
+      <option value="openrouter" selected>OpenRouter — many models, one key</option>
+      <option value="groq">Groq — fastest streaming</option>
+      <option value="gemini">Google Gemini</option>
+      <option value="openai">OpenAI</option>
+      <option value="custom">Custom / self-hosted…</option>
+    </select>
+    <label for="key">API key</label>
+    <input id="key" type="password" placeholder="sk-or-v1-…" autocomplete="off" spellcheck="false">
+    <label for="base">Base URL</label>
+    <input id="base" value="https://openrouter.ai/api/v1" spellcheck="false">
+    <label for="model">Model</label>
+    <input id="model" value="meta-llama/llama-3.3-70b-instruct" spellcheck="false">
+    <div id="keyHint" style="font-size:12px;color:var(--dim);margin-top:8px">
+      No key? <a id="keyLink" href="https://openrouter.ai/keys" target="_blank" rel="noopener"
+                 style="color:var(--cyan)">Get one here</a> — or just press “Play without AI”.
+    </div>
+
+    <label for="deck">Word pack</label>
+
+    <select id="deck">
+      <option value="kids">Kids — animals, actions, everyday things</option>
+      <option value="family" selected>Family — animals, jobs, sports, activities</option>
+      <option value="movies">Movies &amp; books</option>
+      <option value="tricky">Tricky — abstract ideas</option>
+    </select>
+
+    <div class="row">
+      <button id="bStart">Turn on camera &amp; play</button>
+      <button class="ghost" id="bTest">Test the API key</button>
+      <button class="ghost" id="bOffline">Play without AI</button>
+    </div>
+    <div class="warn">Your key stays in this tab's memory and is sent only to the base URL above. Rotate it if it has ever been pasted anywhere shared.</div>
+    <div class="err" id="setupErr" style="display:none"></div>
+  </div>
+
+  <div class="card hidden" id="cRound">
+    <div style="font-size:11px;letter-spacing:.24em;text-transform:uppercase;color:var(--cyan)" id="roundKicker">Round over</div>
+    <h1 id="roundTitle">Got it!</h1>
+    <div class="stats" id="roundStats"></div>
+    <p id="roundNote"></p>
+    <div class="row"><button id="bNext">Next word</button><button class="ghost" id="bMenu">Back to setup</button></div>
+  </div>
+</div>
+
+<script type="module">
+/* ==========================================================================
+   CHARADES vs AI
+   MediaPipe PoseLandmarker -> plain-English motion log -> LLM guesses.
+   The interesting part is the describer: landmarks are useless to a model,
+   sentences are not.
+   ========================================================================== */
+const TASKS = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+const POSE_MODEL = "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task";
+
+const CFG = {
+  ROUND_SEC: 75,
+  WINDOW_MS: 1500,        // one motion sentence per window
+  FIRST_GUESS_MS: 6000,   // let them act a little before the first guess
+  GUESS_EVERY_MS: 4500,
+  OSC_MIN_HZ: 1.2,        // oscillation counts as "repeatedly"
+  OSC_MIN_AMP: 0.28,      // in shoulder widths
+  MOVE_STILL: 0.35,       // below this the body is "still"
+  MAX_LOG_LINES: 26,
+};
+
+const $ = id => document.getElementById(id);
+const canvas = $('stage'), ctx = canvas.getContext('2d');
+const video = $('cam');
+const clamp = (v,a,b) => Math.max(a, Math.min(b,v));
+const lerp = (a,b,t) => a + (b-a)*t;
+const len = (a,b) => Math.hypot(a.x-b.x, a.y-b.y);
+const mid = (a,b) => ({ x:(a.x+b.x)/2, y:(a.y+b.y)/2, v:Math.min(a.v??1,b.v??1) });
+const TAU = Math.PI*2;
+
+const stage = { x:0,y:0,w:0,h:0 };
+function layout(){
+  const dpr = Math.min(devicePixelRatio||1, 2);
+  canvas.width = Math.round(innerWidth*dpr); canvas.height = Math.round(innerHeight*dpr);
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  const availW = innerWidth - (innerWidth > 720 ? Math.min(360, innerWidth*0.34) : 0);
+  const availH = innerHeight - (innerWidth > 720 ? 0 : innerHeight*0.44);
+  let w = availW, h = w/(16/9);
+  if (h > availH){ h = availH; w = h*(16/9); }
+  stage.w=w; stage.h=h; stage.x=(availW-w)/2; stage.y=(availH-h)/2;
+}
+addEventListener('resize', layout);
+
+const A = {
+  screen:'setup', playing:false, offline:false,
+  key:'', base:'', model:'', deck:'family',
+  phrase:null, category:'', roundEndsAt:0, score:0, round:0, wins:0,
+  body:null, fps:0, voice:true, lastError:null,
+  log:[], sentences:[], guessing:false, lastGuessAt:0, bubbles:[], hintGiven:false,
+  deckQueue:[]
+};
+
+/* ---------- pose ---------- */
+const IDX = { nose:0, earL:7, earR:8, shL:11, shR:12, elL:13, elR:14, wrL:15, wrR:16,
+              hipL:23, hipR:24, knL:25, knR:26, anL:27, anR:28 };
+const sm = {};
+function smoothPt(k, p, a=0.5){
+  const s = sm[k];
+  if (!s){ sm[k] = {x:p.x,y:p.y}; return {...p}; }
+  s.x = lerp(s.x,p.x,a); s.y = lerp(s.y,p.y,a);
+  return { x:s.x, y:s.y, v:p.v };
+}
+function buildBody(lm){
+  const b = {};
+  for (const [k,i] of Object.entries(IDX)){
+    const p = lm[i];
+    b[k] = smoothPt(k, { x: stage.x + (1-p.x)*stage.w, y: stage.y + p.y*stage.h, v: p.visibility ?? 1 });
+  }
+  b.neck = mid(b.shL,b.shR); b.pelvis = mid(b.hipL,b.hipR);
+  b.sw = Math.max(len(b.shL,b.shR), stage.w*0.03);
+  b.headTop = b.nose.y - b.sw*0.55;
+  b.ok = Math.min(b.shL.v,b.shR.v,b.hipL.v,b.hipR.v) > 0.5;
+  return b;
+}
+
+let tracker = null, busy = false, lastTs = -1, lastVid = -1, fpsN = 0, fpsAt = 0;
+async function loadTracker(){
+  const mod = await import(TASKS);
+  const fs = await mod.FilesetResolver.forVisionTasks(TASKS + "/wasm");
+  const opts = d => ({ baseOptions:{ modelAssetPath:POSE_MODEL, delegate:d },
+                       runningMode:'VIDEO', numPoses:1,
+                       minPoseDetectionConfidence:.4, minPosePresenceConfidence:.4, minTrackingConfidence:.4 });
+  try { tracker = await mod.PoseLandmarker.createFromOptions(fs, opts('GPU')); }
+  catch(e){ console.warn('[pose] GPU failed, CPU', e); tracker = await mod.PoseLandmarker.createFromOptions(fs, opts('CPU')); }
+}
+function infer(){
+  if (!tracker || busy || !A.playing) return;
+  if (!video.videoWidth || video.currentTime === lastVid) return;
+  lastVid = video.currentTime; busy = true;
+  try {
+    const ts = Math.max(lastTs+1, performance.now()); lastTs = ts;
+    const r = tracker.detectForVideo(video, ts);
+    A.body = r?.landmarks?.[0] ? buildBody(r.landmarks[0]) : null;
+    fpsN++; if (ts - fpsAt > 1000){ A.fps = Math.round(fpsN*1000/(ts-fpsAt)); fpsN=0; fpsAt=ts; }
+  } catch(e){ console.error('[pose]', e); A.lastError = e.message; }
+  finally { busy = false; }
+}
+setInterval(infer, 33);
+
+const CAM_ERR = {
+  NotAllowedError: "Camera permission was refused. Allow it in the address bar, then try again.",
+  NotFoundError: "No camera found on this machine.",
+  NotReadableError: "Another app is using the camera. Close it and retry.",
+  SecurityError: "Cameras need a secure origin. Run: python3 -m http.server 8000 and open localhost:8000",
+};
+async function startCamera(){
+  const stream = await navigator.mediaDevices.getUserMedia({ video:{ width:{ideal:960}, height:{ideal:540}, facingMode:'user' } });
+  video.srcObject = stream; await video.play();
+}
+
+/* ==========================================================================
+   THE DESCRIBER
+   Landmarks mean nothing to a language model. Sentences do. This turns a
+   1.5s window of skeleton frames into one line of plain English.
+   ========================================================================== */
+const baseline = { pelvisY:null, kneeY:null, sw:null, n:0 };
+function updateBaseline(b){
+  baseline.n++;
+  const a = baseline.n < 40 ? 0.12 : 0.004;          // settle fast, then drift slowly
+  baseline.pelvisY = baseline.pelvisY === null ? b.pelvis.y : lerp(baseline.pelvisY, b.pelvis.y, a);
+  const kn = (b.knL.y + b.knR.y)/2;
+  baseline.kneeY = baseline.kneeY === null ? kn : lerp(baseline.kneeY, kn, a);
+  baseline.sw = baseline.sw === null ? b.sw : Math.max(b.sw, lerp(baseline.sw, b.sw, 0.02));
+}
+function resetBaseline(){ baseline.pelvisY = baseline.kneeY = baseline.sw = null; baseline.n = 0; }
+
+// amplitude + rough frequency of a wobbling signal
+function oscillation(vals, dtSec){
+  if (vals.length < 6) return { amp:0, hz:0 };
+  let min = Infinity, max = -Infinity;
+  for (const v of vals){ if (v < min) min = v; if (v > max) max = v; }
+  const amp = (max - min)/2;
+  const mean = (max + min)/2, dead = amp*0.35;
+  let crossings = 0, state = 0;
+  for (const v of vals){
+    if (v > mean + dead && state !== 1){ if (state !== 0) crossings++; state = 1; }
+    else if (v < mean - dead && state !== -1){ if (state !== 0) crossings++; state = -1; }
+  }
+  const dur = vals.length*dtSec;
+  return { amp, hz: dur > 0 ? crossings/2/dur : 0 };
+}
+
+// per-frame body-local features, all in shoulder-widths
+function features(b){
+  const sw = b.sw;
+  const chestY = lerp(b.neck.y, b.pelvis.y, .45);
+  const zone = w => w.y < b.headTop ? 'above head'
+                 : w.y < b.nose.y + sw*0.2 ? 'at head height'
+                 : w.y < b.neck.y + sw*0.35 ? 'at shoulder height'
+                 : w.y < chestY + sw*0.3 ? 'at chest height'
+                 : w.y < b.pelvis.y + sw*0.3 ? 'at hip height'
+                 : 'down low';
+  return {
+    sw,
+    zoneL: zone(b.wrL), zoneR: zone(b.wrR),
+    aboveHead: (b.wrL.y < b.headTop ? 1 : 0) + (b.wrR.y < b.headTop ? 1 : 0),
+    handsApart: len(b.wrL, b.wrR)/sw,
+    spanX: Math.abs(b.wrL.x - b.wrR.x)/sw,
+    faceL: len(b.wrL, b.nose)/sw, faceR: len(b.wrR, b.nose)/sw,
+    faceNear: (len(b.wrL,b.nose)/sw < 0.78 && Math.abs(b.wrL.y - b.nose.y) < sw*0.55) ||
+              (len(b.wrR,b.nose)/sw < 0.78 && Math.abs(b.wrR.y - b.nose.y) < sw*0.55),
+    hipHandL: len(b.wrL, b.hipL)/sw, hipHandR: len(b.wrR, b.hipR)/sw,
+    // mirrored view: the left wrist normally sits left of centre, so being on the
+    // far side means the arms are actually crossed. Chest height only.
+    crossed: (b.wrL.x - b.pelvis.x) > sw*0.15 && (b.pelvis.x - b.wrR.x) > sw*0.15
+             && len(b.wrL,b.wrR)/sw > 0.8
+             && b.wrL.y > b.neck.y && b.wrR.y > b.neck.y,
+    reachL: Math.abs(b.wrL.x - b.pelvis.x)/sw, reachR: Math.abs(b.wrR.x - b.pelvis.x)/sw,
+    crouch: baseline.pelvisY === null ? 0 : (b.pelvis.y - baseline.pelvisY)/sw,
+    kneeUpL: baseline.kneeY === null ? 0 : (baseline.kneeY - b.knL.y)/sw,
+    kneeUpR: baseline.kneeY === null ? 0 : (baseline.kneeY - b.knR.y)/sw,
+    lean: Math.atan2(b.neck.x - b.pelvis.x, b.pelvis.y - b.neck.y)*180/Math.PI,
+    turned: baseline.sw ? b.sw/baseline.sw : 1,
+    wxL: (b.wrL.x - b.pelvis.x)/sw, wyL: (b.wrL.y - b.neck.y)/sw,
+    wxR: (b.wrR.x - b.pelvis.x)/sw, wyR: (b.wrR.y - b.neck.y)/sw,
+    pelvisY: b.pelvis.y/sw,
+  };
+}
+
+const most = arr => { const c = {}; let best = arr[0], n = 0;
+  for (const v of arr){ c[v] = (c[v]||0)+1; if (c[v] > n){ n = c[v]; best = v; } } return best; };
+const avg = arr => arr.reduce((s,v)=>s+v,0)/(arr.length||1);
+
+/* one window of frames -> one sentence + machine-readable tags */
+function describe(frames){
+  if (frames.length < 3) return null;
+  const F = frames.map(f => f.feat);
+  const dt = Math.max(0.02, (frames[frames.length-1].t - frames[0].t)/1000/frames.length);
+  const sw = avg(F.map(f => f.sw));
+
+  // travel of each wrist across the window, in shoulder-widths per second
+  let energy = 0;
+  for (let i=1;i<frames.length;i++){
+    const a = frames[i-1].b, b2 = frames[i].b;
+    energy += (len(a.wrL,b2.wrL) + len(a.wrR,b2.wrR) + len(a.anL,b2.anL) + len(a.anR,b2.anR))/4/sw;
+  }
+  energy = energy/((frames[frames.length-1].t - frames[0].t)/1000 || 1);
+
+  const oyL = oscillation(F.map(f=>f.wyL), dt), oyR = oscillation(F.map(f=>f.wyR), dt);
+  const oxL = oscillation(F.map(f=>f.wxL), dt), oxR = oscillation(F.map(f=>f.wxR), dt);
+  const oKnee = oscillation(F.map(f=>f.kneeUpL - f.kneeUpR), dt);
+  const oPelvis = oscillation(F.map(f=>f.pelvisY), dt);
+  const oTurn = oscillation(F.map(f=>f.turned), dt);
+
+  const t = {
+    energy: +energy.toFixed(2),
+    aboveHead: avg(F.map(f=>f.aboveHead)),
+    handsApart: avg(F.map(f=>f.handsApart)),
+    spanX: avg(F.map(f=>f.spanX)),
+    faceMin: Math.min(avg(F.map(f=>f.faceL)), avg(F.map(f=>f.faceR))),
+    faceNear: avg(F.map(f=>f.faceNear?1:0)) > .55,
+    hipHands: (avg(F.map(f=>f.hipHandL)) + avg(F.map(f=>f.hipHandR)))/2,
+    crossed: avg(F.map(f=>f.crossed?1:0)) > .6,
+    crouch: avg(F.map(f=>f.crouch)),
+    kneeUp: Math.max(avg(F.map(f=>f.kneeUpL)), avg(F.map(f=>f.kneeUpR))),
+    lean: avg(F.map(f=>f.lean)),
+    turned: avg(F.map(f=>f.turned)),
+    zoneL: most(F.map(f=>f.zoneL)), zoneR: most(F.map(f=>f.zoneR)),
+    oscY: Math.max(oyL.hz, oyR.hz), ampY: Math.max(oyL.amp, oyR.amp),
+    oscX: Math.max(oxL.hz, oxR.hz), ampX: Math.max(oxL.amp, oxR.amp),
+    march: oKnee.hz, marchAmp: oKnee.amp,
+    bob: oPelvis.hz, bobAmp: oPelvis.amp,
+    spin: oTurn.hz,
+  };
+
+  // ---- posture clause
+  const posture = [];
+  if (t.crouch > 0.85) posture.push('crouched right down');
+  else if (t.crouch > 0.4) posture.push('bent low');
+  else if (t.crouch < -0.35) posture.push('stretching up tall');
+  if (t.kneeUp > 0.45 && t.march < 0.6) posture.push('one leg lifted up');
+  if (Math.abs(t.lean) > 16) posture.push(t.lean > 0 ? 'leaning right' : 'leaning left');
+  if (t.turned < 0.62) posture.push('turned side-on to the camera');
+
+  // ---- arms clause
+  const arms = [];
+  if (t.aboveHead >= 1.6) arms.push('both arms up above the head');
+  else if (t.aboveHead >= 0.7) arms.push('one arm raised above the head');
+  if (t.spanX > 2.6 && t.aboveHead < 1) arms.push('arms stretched out wide to the sides');
+  if (t.handsApart < 0.7) arms.push('hands held together in front');
+  if (t.faceNear) arms.push('a hand up near the face');
+  if (t.crossed) arms.push('arms crossed over the chest');
+  if (t.hipHands < 0.75 && t.handsApart > 1.2 && t.energy < 1.2) arms.push('hands resting on the hips');
+  if (!arms.length){
+    const z = t.zoneL === t.zoneR ? `both hands ${t.zoneL}` : `left hand ${t.zoneL}, right hand ${t.zoneR}`;
+    arms.push(z);
+  }
+
+  // ---- movement clause
+  const move = [];
+  const fast = t.oscY > 2.4 || t.oscX > 2.4;
+  if (t.oscY >= CFG.OSC_MIN_HZ && t.ampY >= CFG.OSC_MIN_AMP)
+    move.push(`arms pumping up and down${fast ? ' fast' : ''}`);
+  if (t.oscX >= CFG.OSC_MIN_HZ && t.ampX >= CFG.OSC_MIN_AMP)
+    move.push(`hands swinging side to side${fast ? ' quickly' : ''}`);
+  if (t.march > 0.8 && t.marchAmp > 0.15) move.push('marching or running on the spot');
+  if (t.bob > 0.9 && t.bobAmp > 0.18) move.push('bobbing up and down');
+  if (t.spin > 0.5) move.push('turning around and around');
+  if (!move.length){
+    if (t.energy < CFG.MOVE_STILL) move.push('holding almost completely still');
+    else if (t.energy < 1.1) move.push('moving slowly');
+    else if (t.energy < 2.4) move.push('moving steadily');
+    else move.push('moving fast and wildly');
+  }
+
+  const text = [posture.join(' and '), arms.join(', '), move.join(' and ')].filter(Boolean).join('; ');
+  return { text, tags: t };
+}
+
+/* rolling buffer that emits one sentence per window */
+const motion = {
+  frames: [], sentences: [], lastEmit: 0,
+  reset(){ this.frames = []; this.sentences = []; this.lastEmit = 0; resetBaseline(); },
+  push(b, tMs){
+    if (!b || !b.ok) return null;
+    updateBaseline(b);
+    this.frames.push({ t:tMs, b, feat: features(b) });
+    while (this.frames.length && tMs - this.frames[0].t > CFG.WINDOW_MS*1.4) this.frames.shift();
+    if (!this.lastEmit) this.lastEmit = tMs;
+    if (tMs - this.lastEmit < CFG.WINDOW_MS) return null;
+    this.lastEmit = tMs;
+    const d = describe(this.frames);
+    if (!d) return null;
+    const secs = Math.round((tMs - (A.roundStartedAt || tMs))/1000);
+    const line = `${secs}s: ${d.text}`;
+    this.sentences.push(line);
+    if (this.sentences.length > CFG.MAX_LOG_LINES) this.sentences.shift();
+    return line;
+  },
+  transcript(){ return this.sentences.join('\n'); }
+};
+
+/* ==========================================================================
+   LLM CLIENT — OpenAI-compatible streaming, called straight from the browser
+   Providers listed in PROVIDERS send CORS headers, so no proxy is needed.
+   ========================================================================== */
+
+class LLMError extends Error {
+  constructor(msg, kind){ super(msg); this.kind = kind; }
+}
+
+/* Every provider here answers CORS preflight, so the page talks to it directly.
+   Anything that does not (NVIDIA NIM, Anthropic, most self-hosted setups without
+   a CORS config) will fail in the browser no matter what this code does. */
+const PROVIDERS = {
+  openrouter:{ base:'https://openrouter.ai/api/v1',  model:'meta-llama/llama-3.3-70b-instruct',
+               hint:'sk-or-v1-…', keys:'https://openrouter.ai/keys' },
+  groq:      { base:'https://api.groq.com/openai/v1', model:'llama-3.3-70b-versatile',
+               hint:'gsk_…', keys:'https://console.groq.com/keys' },
+  gemini:    { base:'https://generativelanguage.googleapis.com/v1beta/openai',
+               model:'gemini-2.0-flash', hint:'AIza…', keys:'https://aistudio.google.com/apikey' },
+  openai:    { base:'https://api.openai.com/v1', model:'gpt-4o-mini',
+               hint:'sk-…', keys:'https://platform.openai.com/api-keys' },
+  custom:    { base:'', model:'', hint:'your key', keys:'' },
+};
+
+
+async function callLLM({ messages, maxTokens = 220, temperature = 0.9, onDelta, signal }){
+  if (!A.key) throw new LLMError('No API key set.', 'key');
+  let res;
+  try {
+    res = await fetch(A.base.replace(/\/+$/,'') + '/chat/completions', {
+      method:'POST', signal,
+      headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer ' + A.key, 'Accept':'text/event-stream' },
+      // Plain OpenAI-shaped body only — vendor extras make other providers 400.
+      body: JSON.stringify({
+        model: A.model, messages, temperature, top_p:0.95, max_tokens:maxTokens, stream:true
+      })
+    });
+
+  } catch(e){
+    if (e.name === 'AbortError') throw e;
+    throw new LLMError(
+      'The browser could not reach ' + A.base + '.\n\n' +
+      'Usually this means the endpoint does not allow browser (CORS) requests —\n' +
+      'NVIDIA NIM and Anthropic are common examples.\n' +
+      'Pick OpenRouter, Groq, Gemini or OpenAI above: those work directly from a page.\n' +
+      'Otherwise check the URL, your network, and that the key is still valid.', 'network');
+
+  }
+  if (!res.ok){
+    const body = await res.text().catch(()=> '');
+    const kind = res.status === 401 || res.status === 403 ? 'key' : res.status === 404 ? 'model' : 'http';
+    throw new LLMError(`HTTP ${res.status} from the API.\n${body.slice(0,400)}`, kind);
+  }
+
+  const reader = res.body.getReader(), dec = new TextDecoder();
+  let buf = '', out = '';
+  while (true){
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream:true });
+    const lines = buf.split('\n');
+    buf = lines.pop();
+    for (const raw of lines){
+      const line = raw.trim();
+      if (!line.startsWith('data:')) continue;
+      const data = line.slice(5).trim();
+      if (data === '[DONE]') continue;
+      let j; try { j = JSON.parse(data); } catch { continue; }
+      const d = j.choices?.[0]?.delta;
+      if (!d) continue;
+      if (typeof d.content === 'string' && d.content){
+        out += d.content;
+        onDelta?.(d.content, out);
+      }
+    }
+  }
+  return out.trim();
+}
+
+/* ---------- word decks: built in, optionally refreshed by the model ------- */
+const DECKS = {
+  kids: ['elephant','brushing teeth','riding a bike','cat','airplane','swimming','birthday cake','monkey',
+         'sleeping','football','rain','snake','driving a car','robot','eating spaghetti','butterfly'],
+  family:['fishing','playing guitar','penguin','doctor','washing the dishes','skiing','photographer','kangaroo',
+          'boxing','making pizza','climbing a ladder','waiter','gardening','tightrope walker','bowling','chicken'],
+  movies:['King Kong','Titanic','Jaws','Frozen','The Matrix','Jurassic Park','Rocky','Harry Potter',
+          'Star Wars','Finding Nemo','Ghostbusters','Home Alone'],
+  tricky:['gravity','jealousy','time travel','democracy','falling asleep in a meeting','writer\'s block',
+          'the internet','stage fright','deja vu','running late']
+};
+const CATEGORY_OF = { kids:'a simple word a young child would act out', family:'an everyday activity, animal or job',
+                      movies:'a well-known film or book', tricky:'an abstract idea or situation' };
+
+async function refillDeck(){
+  const fallback = () => { A.deckQueue = [...DECKS[A.deck]].sort(() => Math.random()-0.5).slice(0, 10); };
+  if (A.offline || !A.key){ fallback(); return; }
+  try {
+    const txt = await callLLM({
+      maxTokens: 200, temperature: 1.1,
+      messages: [
+        { role:'system', content:'You write charades prompts. Reply with ONLY a comma-separated list, no numbering, no extra words.' },
+        { role:'user', content: `Give 10 charades phrases. Each should be ${CATEGORY_OF[A.deck]}, actable with the whole body, 1-3 words, well known. Avoid anything needing props or speech.` }
+      ]
+    });
+    const list = txt.split(/[,\n]/).map(s => s.replace(/^[\s\d.\-•"']+|["']+$/g,'').trim())
+                    .filter(s => s.length > 1 && s.length < 40 && s.split(' ').length <= 4);
+    A.deckQueue = list.length >= 4 ? list : null;
+    if (!A.deckQueue) fallback();
+  } catch(e){ console.warn('[deck] falling back to built-in list', e); fallback(); }
+}
+async function nextPhrase(){
+  if (!A.deckQueue || !A.deckQueue.length) await refillDeck();
+  return A.deckQueue.shift() || DECKS[A.deck][0];
+}
+
+/* ---------- guessing ---------- */
+const GUESS_SYSTEM =
+`You are playing charades and you are the guesser. You cannot see video. You receive a time-stamped log describing a person's body movements, written by a pose tracker.
+The log is crude: it knows arms, legs, lean, crouch and rhythm, but nothing about fingers, facial expression or objects. Read it generously and think about what someone would DO to mime something.
+Reply in exactly this format, nothing else:
+GUESS: <your single best guess, 1-4 words>
+ALSO: <second guess> | <third guess>
+SAY: <one short playful sentence to the player, under 15 words>
+Never repeat a guess you already made. Commit to specific answers - vague guesses like "an animal" are worthless.`;
+
+function guessPrompt(){
+  const tried = A.bubbles.flatMap(b => [b.guess, ...(b.alts||[])]).filter(Boolean);
+  const parts = [`Movement log so far:\n${motion.transcript() || '(nothing yet)'}`];
+  if (A.hintGiven) parts.push(`Hint: the answer is ${CATEGORY_OF[A.deck]}.`);
+  if (tried.length) parts.push(`Already guessed (do not repeat): ${tried.join(', ')}`);
+  parts.push('What are they acting out?');
+  return parts.join('\n\n');
+}
+
+function parseGuess(text){
+  const g = /GUESS:\s*(.+)/i.exec(text), a = /ALSO:\s*(.+)/i.exec(text), s = /SAY:\s*(.+)/i.exec(text);
+  return {
+    guess: g ? g[1].trim().replace(/[."]+$/,'') : '',
+    alts: a ? a[1].split('|').map(x => x.trim()).filter(Boolean) : [],
+    say: s ? s[1].trim() : ''
+  };
+}
+
+/* ---------- did they get it? ---------- */
+const STOP = new Set(['a','an','the','of','and','to','in','on','is','it','my','your']);
+const norm = s => (s||'').toLowerCase().replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ').trim();
+const toks = s => norm(s).split(' ').filter(w => w && !STOP.has(w));
+const stem = w => w.replace(/(ing|ed|es|s)$/,'');
+// crude phonetic key, so "elefant" matches "elephant" without loosening edit distance
+const phon = w => w.replace(/ph/g,'f').replace(/ck/g,'k').replace(/[cq]/g,'k')
+                    .replace(/z/g,'s').replace(/(.)\1+/g,'$1').replace(/e$/,'');
+function sameWord(a, b){
+  if (a === b) return true;
+  const x = stem(a), y = stem(b);
+  if (x === y) return true;
+  if (x.length >= 3 && y.length >= 3 && (x.startsWith(y) || y.startsWith(x))) return true;
+  if (x.length > 3 && phon(x) === phon(y)) return true;
+  return x.length > 3 && y.length > 3 && editRatio(x, y) > 0.78;
+}
+
+function editRatio(a, b){
+  if (a === b) return 1;
+  if (!a.length || !b.length) return 0;
+  const m = a.length, n = b.length;
+  let prev = Array.from({length:n+1}, (_,j) => j), cur = new Array(n+1);
+  for (let i=1;i<=m;i++){
+    cur[0] = i;
+    for (let j=1;j<=n;j++)
+      cur[j] = Math.min(prev[j]+1, cur[j-1]+1, prev[j-1] + (a[i-1] === b[j-1] ? 0 : 1));
+    [prev, cur] = [cur, prev];
+  }
+  return 1 - prev[n]/Math.max(m,n);
+}
+
+function matchGuess(guess, phrase){
+  const g = norm(guess), p = norm(phrase);
+  if (!g || !p) return false;
+  if (g === p) return true;
+  const gt = toks(guess), pt = toks(phrase);
+  if (!pt.length) return false;
+  const gs = new Set(gt);
+  // every significant word of the answer appears in the guess (or a close variant)
+  const covered = pt.filter(w => gs.has(w) || [...gs].some(x => sameWord(x, w))).length;
+  if (covered / pt.length >= (pt.length > 1 ? 0.8 : 1)) return true;
+  return editRatio(g, p) >= 0.82;
+}
+
+/* ---------- speech ---------- */
+function say(text){
+  if (!A.voice || !window.speechSynthesis || !text) return;
+  try {
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 1.06; u.pitch = 1.05; u.volume = 0.9;
+    speechSynthesis.cancel(); speechSynthesis.speak(u);
+  } catch(e){ /* speech is a bonus, never a blocker */ }
+}
+
+/* ==========================================================================
+   GAME LOOP + UI
+   ========================================================================== */
+function showScreen(id){
+  ['cSetup','cRound'].forEach(x => $(x).classList.toggle('hidden', x !== id));
+  $('screens').classList.toggle('hidden', !id);
+  $('top').classList.toggle('hidden', !!id);
+  $('side').classList.toggle('hidden', !!id);
+  A.screen = id || 'play';
+}
+
+function addBubble(kind, data){
+  const el = document.createElement('div');
+  el.className = 'bubble' + (kind ? ' ' + kind : '');
+  el.innerHTML = `<div class="g"></div><div class="alt"></div><div class="say"></div>`;
+  $('guesses').appendChild(el);
+  $('guesses').scrollTop = 1e9;
+  return {
+    el,
+    set(d){
+      el.querySelector('.g').textContent = d.guess || '…';
+      el.querySelector('.alt').textContent = d.alts?.length ? 'or ' + d.alts.join(' · ') : '';
+      el.querySelector('.say').textContent = d.say || '';
+    },
+    hit(){ el.classList.add('hit'); },
+    error(msg){ el.classList.add('err'); el.querySelector('.g').textContent = msg; }
+  };
+}
+
+async function askForGuess(){
+  if (A.guessing || !A.playing) return;
+  if (motion.sentences.length < 2) return;
+  A.guessing = true; A.lastGuessAt = performance.now();
+  const bubble = addBubble('', {});
+  const rec = { guess:'', alts:[], say:'' };
+  A.bubbles.push(rec);
+  try {
+    if (A.offline) throw new LLMError('AI is off — playing solo. Use “Skip word” when you are done.', 'offline');
+    const text = await callLLM({
+      maxTokens: 160, temperature: 0.95,
+      messages: [{ role:'system', content: GUESS_SYSTEM }, { role:'user', content: guessPrompt() }],
+      onDelta: (_, full) => bubble.set(parseGuess(full))
+    });
+    const p = parseGuess(text);
+    Object.assign(rec, p);
+    bubble.set(p);
+    const all = [p.guess, ...p.alts];
+    const hitIdx = all.findIndex(g => matchGuess(g, A.phrase));
+    if (hitIdx >= 0){
+      bubble.hit(); say(`${all[hitIdx]}! Got it!`);
+      endRound(true, all[hitIdx]);
+    } else {
+      say([p.guess, p.say].filter(Boolean).join('. '));
+    }
+  } catch(e){
+    if (e.name !== 'AbortError'){
+      bubble.error(e.message);
+      A.lastError = e.message;
+      if (e.kind === 'key' || e.kind === 'network'){ A.offline = true; }
+      console.error('[llm]', e);
+    }
+  } finally { A.guessing = false; }
+}
+
+async function startRound(){
+  A.round++;
+  A.phrase = await nextPhrase();
+  A.hintGiven = false; A.bubbles = []; $('guesses').innerHTML = ''; $('log').textContent = '';
+  motion.reset();
+  A.roundStartedAt = performance.now();
+  A.roundEndsAt = A.roundStartedAt + CFG.ROUND_SEC*1000;
+  A.lastGuessAt = A.roundStartedAt - (CFG.GUESS_EVERY_MS - CFG.FIRST_GUESS_MS);
+  A.playing = true;
+  showScreen(null);
+  console.info('[round]', A.round, '->', A.phrase);
+}
+
+function endRound(won, byGuess){
+  if (!A.playing) return;
+  A.playing = false;
+  const left = Math.max(0, Math.round((A.roundEndsAt - performance.now())/1000));
+  const pts = won ? left*10 + 50 - (A.hintGiven ? 20 : 0) : 0;
+  A.score += pts; if (won) A.wins++;
+  $('roundKicker').textContent = won ? 'Guessed it' : 'Time';
+  $('roundTitle').textContent = won ? `“${byGuess}” — yes!` : `It was “${A.phrase}”`;
+  $('roundStats').innerHTML = `
+    <div class="stat"><span>${pts}</span><small>Points</small></div>
+    <div class="stat"><span>${A.score}</span><small>Total</small></div>
+    <div class="stat"><span>${A.wins}/${A.round}</span><small>Guessed</small></div>`;
+  $('roundNote').textContent = won
+    ? `It took ${A.bubbles.length} guess${A.bubbles.length === 1 ? '' : 'es'} and ${CFG.ROUND_SEC - left}s.`
+    : (A.offline ? 'AI is off — no guessing happening.' : 'Try bigger, slower, more repetitive movements: the tracker only sees limbs, lean and rhythm.');
+  showScreen('cRound');
+}
+
+/* ---------- rendering ---------- */
+function drawScene(){
+  const g = ctx.createLinearGradient(0,0,0,innerHeight);
+  g.addColorStop(0,'#0B0F1E'); g.addColorStop(1,'#171F3D');
+  ctx.fillStyle = g; ctx.fillRect(0,0,innerWidth,innerHeight);
+
+  if (video.readyState >= 2){
+    ctx.save(); ctx.translate(stage.x+stage.w, stage.y); ctx.scale(-1,1);
+    ctx.globalAlpha = .55; ctx.drawImage(video, 0, 0, stage.w, stage.h); ctx.restore(); ctx.globalAlpha = 1;
+  }
+  ctx.strokeStyle = '#2A3454'; ctx.lineWidth = 2; ctx.strokeRect(stage.x, stage.y, stage.w, stage.h);
+
+  const b = A.body;
+  if (b){
+    const bones = [['shL','shR'],['hipL','hipR'],['shL','hipL'],['shR','hipR'],['shL','elL'],['elL','wrL'],
+                   ['shR','elR'],['elR','wrR'],['hipL','knL'],['knL','anL'],['hipR','knR'],['knR','anR']];
+    ctx.save(); ctx.strokeStyle = 'rgba(67,217,255,.85)'; ctx.lineWidth = 5; ctx.lineCap='round';
+    ctx.beginPath();
+    for (const [p,q] of bones){ ctx.moveTo(b[p].x,b[p].y); ctx.lineTo(b[q].x,b[q].y); }
+    ctx.stroke();
+    ctx.beginPath(); ctx.arc(b.nose.x, b.nose.y, b.sw*0.3, 0, TAU); ctx.stroke();
+    ctx.fillStyle = '#FFC93C';
+    for (const k of ['wrL','wrR','anL','anR']){ ctx.beginPath(); ctx.arc(b[k].x, b[k].y, 8, 0, TAU); ctx.fill(); }
+    ctx.restore();
+  } else if (A.playing){
+    ctx.save(); ctx.font = '600 26px Fredoka, system-ui'; ctx.textAlign='center'; ctx.fillStyle='#FFC93C';
+    ctx.fillText('step back so your whole body is in frame', stage.x+stage.w/2, stage.y+stage.h/2);
+    ctx.restore();
+  }
+
+  if (!A.playing) return;
+  const left = Math.max(0, (A.roundEndsAt - performance.now())/1000);
+
+  // the word, big, for the actor
+  ctx.save();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  ctx.font = '600 13px "IBM Plex Mono", monospace'; ctx.fillStyle = '#8E9ABF';
+  ctx.fillText('ACT THIS OUT', stage.x+stage.w/2, stage.y+16);
+  const size = Math.min(58, stage.w/Math.max(9, A.phrase.length*0.62));
+  ctx.font = `700 ${Math.round(size)}px Fredoka, system-ui`;
+  ctx.lineWidth = 8; ctx.strokeStyle = 'rgba(11,15,30,.9)';
+  ctx.strokeText(A.phrase.toUpperCase(), stage.x+stage.w/2, stage.y+36);
+  ctx.fillStyle = '#F0F3FF'; ctx.fillText(A.phrase.toUpperCase(), stage.x+stage.w/2, stage.y+36);
+
+  // timer bar
+  const w = stage.w - 48;
+  ctx.fillStyle = '#1B2240';
+  ctx.beginPath(); ctx.roundRect(stage.x+24, stage.y+stage.h-34, w, 14, 7); ctx.fill();
+  ctx.fillStyle = left < 12 ? '#FF5C8A' : '#5BE39A';
+  ctx.beginPath(); ctx.roundRect(stage.x+24, stage.y+stage.h-34, Math.max(6, w*left/CFG.ROUND_SEC), 14, 7); ctx.fill();
+  ctx.font = '600 14px "IBM Plex Mono", monospace'; ctx.textAlign='left'; ctx.fillStyle='#8E9ABF';
+  ctx.fillText(`${Math.ceil(left)}s · round ${A.round} · score ${A.score} · ${A.fps}fps${A.offline ? ' · AI OFF' : ''}`,
+               stage.x+24, stage.y+stage.h-58);
+  ctx.restore();
+}
+
+let lastFrame = performance.now();
+function frame(now){
+  requestAnimationFrame(frame);
+  lastFrame = now;
+  if (A.playing && A.body){
+    const line = motion.push(A.body, now);
+    if (line){
+      const el = $('log');
+      el.textContent = motion.sentences.join('\n');
+      el.scrollTop = 1e9;
+    }
+    if (!A.guessing && now - A.lastGuessAt > CFG.GUESS_EVERY_MS) askForGuess();
+    if (now > A.roundEndsAt) endRound(false);
+  }
+  drawScene();
+}
+
+/* ---------- wiring ---------- */
+function readSetup(){
+  A.key = $('key').value.trim();
+  A.base = $('base').value.trim();
+  A.model = $('model').value.trim();
+  A.deck = $('deck').value;
+}
+function setupError(msg){
+  const el = $('setupErr');
+  el.style.display = msg ? 'block' : 'none';
+  el.textContent = msg || '';
+}
+
+/* Switching provider fills in the endpoint + a sane default model. Editing the
+   base or model by hand flips the picker to "custom" so nothing gets clobbered. */
+function applyProvider(){
+  const p = PROVIDERS[$('provider').value];
+  if (!p) return;
+  if (p.base) $('base').value = p.base;
+  if (p.model) $('model').value = p.model;
+  $('key').placeholder = p.hint;
+  const link = $('keyLink');
+  if (p.keys){ link.href = p.keys; link.parentElement.style.display = ''; }
+  else link.parentElement.style.display = 'none';
+}
+$('provider').addEventListener('change', () => { applyProvider(); setupError(''); });
+for (const id of ['base','model']){
+  $(id).addEventListener('input', () => {
+    const p = PROVIDERS[$('provider').value];
+    if (p && ($('base').value !== p.base || $('model').value !== p.model)) $('provider').value = 'custom';
+  });
+}
+applyProvider();
+
+$('bTest').addEventListener('click', async () => {
+
+  readSetup(); setupError('');
+  $('bTest').disabled = true; $('bTest').textContent = 'Testing…';
+  try {
+    const out = await callLLM({ maxTokens: 24, temperature: 0.2,
+      messages:[{ role:'user', content:'Reply with exactly: READY' }] });
+    setupError('');
+    $('bTest').textContent = out.toUpperCase().includes('READY') ? '✓ Key works' : '✓ Responded: ' + out.slice(0,40);
+  } catch(e){
+    setupError(e.message);
+    $('bTest').textContent = 'Test the API key';
+  } finally { $('bTest').disabled = false; }
+});
+
+async function begin(offline){
+  readSetup();
+  A.offline = !!offline || !A.key;
+  setupError('');
+  $('bStart').disabled = true; $('bStart').textContent = 'Starting…';
+  try {
+    await startCamera();
+    if (!tracker){ $('bStart').textContent = 'Loading tracker…'; await loadTracker(); }
+    layout();
+    A.score = 0; A.round = 0; A.wins = 0; A.deckQueue = null;
+    await startRound();
+  } catch(e){
+    setupError(CAM_ERR[e.name] || e.message || String(e));
+    console.error(e);
+  } finally { $('bStart').disabled = false; $('bStart').textContent = 'Turn on camera & play'; }
+}
+$('bStart').addEventListener('click', () => begin(false));
+$('bOffline').addEventListener('click', () => begin(true));
+$('bNext').addEventListener('click', () => startRound());
+$('bMenu').addEventListener('click', () => { A.playing = false; showScreen('cSetup'); });
+$('bQuit').addEventListener('click', () => { A.playing = false; showScreen('cSetup'); });
+$('bSkip').addEventListener('click', () => endRound(false));
+$('bHint').addEventListener('click', () => { A.hintGiven = true; $('bHint').disabled = true; askForGuess(); });
+$('bVoice').addEventListener('click', () => {
+  A.voice = !A.voice; $('bVoice').setAttribute('aria-pressed', String(A.voice));
+  if (!A.voice) try { speechSynthesis.cancel(); } catch(e){}
+});
+addEventListener('keydown', e => {
+  if (A.screen !== 'play') return;
+  if (e.key === 'Escape'){ A.playing = false; showScreen('cSetup'); }
+  if (e.key === 's') endRound(false);
+  if (e.key === 'g') askForGuess();
+});
+
+layout(); showScreen('cSetup'); requestAnimationFrame(frame);
+console.info('[charades] ready');
+</script>
+</body>
+</html>
