@@ -1,0 +1,883 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Copilot Desk — listens, decides, remembers</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#080B12; --panel:#121724; --panel2:#171E30; --line:#242E45;
+  --ink:#E9EEF9; --dim:#8593B0; --faint:#5C6784;
+  --teal:#4DD6C1; --amber:#F5B942; --coral:#FF6B6B; --violet:#9B8CFF;
+  --s:'Space Grotesk',system-ui,sans-serif; --m:'IBM Plex Mono',ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--ink);font-family:var(--s)}
+body{display:flex;flex-direction:column}
+
+/* ---------- top status strip ---------- */
+#bar{flex:0 0 auto;display:flex;align-items:center;gap:14px;padding:12px 18px;border-bottom:1px solid var(--line);
+  background:rgba(18,23,36,.7);backdrop-filter:blur(12px)}
+.dot{width:9px;height:9px;border-radius:50%;background:#33405C;flex:0 0 auto}
+.dot.on{background:var(--teal);box-shadow:0 0 12px var(--teal)}
+.dot.rec{background:var(--coral);box-shadow:0 0 12px var(--coral);animation:pulse 1.4s infinite}
+@keyframes pulse{50%{opacity:.35}}
+#barTitle{font-weight:600;font-size:15px;letter-spacing:.01em}
+#barMeta{font-family:var(--m);font-size:11.5px;color:var(--dim);margin-left:auto;text-align:right;line-height:1.5}
+#bar button{font-family:var(--s);font-size:12.5px;font-weight:600;border:1px solid var(--line);background:transparent;
+  color:var(--dim);border-radius:999px;padding:7px 13px;cursor:pointer}
+#bar button:hover{color:var(--ink);border-color:var(--teal)}
+#bar button[aria-pressed="true"]{background:var(--teal);color:#06120F;border-color:var(--teal)}
+
+/* ---------- carousel ---------- */
+#deck{flex:1 1 auto;position:relative;overflow:hidden}
+.card{position:absolute;inset:0;padding:22px 26px 90px;overflow-y:auto;scrollbar-width:thin;
+  opacity:0;transform:translateX(40px);pointer-events:none;transition:opacity .22s ease,transform .22s ease}
+.card.live{opacity:1;transform:none;pointer-events:auto}
+.card h2{font-size:13px;letter-spacing:.18em;text-transform:uppercase;color:var(--teal);margin:0 0 4px}
+.card h3{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);margin:22px 0 10px}
+.big{font-size:clamp(28px,4vw,44px);font-weight:600;margin:2px 0 12px;letter-spacing:-.01em}
+.grid2{display:grid;grid-template-columns:1.15fr .85fr;gap:22px;height:100%}
+@media (max-width:900px){ .grid2{grid-template-columns:1fr} }
+
+.item{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--faint);
+  border-radius:10px;padding:11px 13px;margin-bottom:9px;font-size:14.5px;line-height:1.5}
+.item small{display:block;font-family:var(--m);font-size:10.5px;color:var(--faint);margin-top:5px;letter-spacing:.04em}
+.item.decision{border-left-color:var(--teal)}
+.item.action{border-left-color:var(--amber)}
+.item.mine{border-left-color:var(--coral);background:#1D1620}
+.item.question{border-left-color:var(--violet)}
+.item.flag{border-left-color:#FFF;background:#1B2233}
+.empty{color:var(--faint);font-size:13.5px;font-style:italic;padding:6px 0}
+
+#transcript{background:#0C1018;border:1px solid var(--line);border-radius:12px;padding:14px;
+  font-size:14px;line-height:1.65;height:min(46vh,420px);overflow-y:auto;color:#B9C6E0}
+#transcript .seg{margin-bottom:9px}
+#transcript .seg b{color:var(--faint);font-family:var(--m);font-size:10.5px;margin-right:8px}
+#transcript .interim{color:var(--faint);font-style:italic}
+#nudge{position:fixed;left:50%;transform:translateX(-50%);bottom:96px;max-width:min(720px,92vw);z-index:30;
+  background:#20283C;border:1px solid var(--amber);border-left:4px solid var(--amber);border-radius:12px;
+  padding:13px 18px;font-size:15px;box-shadow:0 18px 50px rgba(0,0,0,.5);display:none}
+#nudge.show{display:block}
+#nudge small{display:block;color:var(--faint);font-family:var(--m);font-size:10.5px;margin-top:5px}
+
+/* ---------- gesture HUD ---------- */
+#hud{position:fixed;right:16px;bottom:16px;width:210px;background:rgba(18,23,36,.9);backdrop-filter:blur(10px);
+  border:1px solid var(--line);border-radius:14px;overflow:hidden;z-index:25}
+#hudCam{position:relative;aspect-ratio:4/3;background:#070A11}
+#hudCam video,#hudCam canvas{position:absolute;inset:0;width:100%;height:100%;transform:scaleX(-1)}
+#hudCam video{object-fit:cover;opacity:.25}
+#hudLabel{padding:8px 11px;border-top:1px solid var(--line);font-family:var(--m);font-size:10.5px;
+  letter-spacing:.08em;text-transform:uppercase;color:var(--dim)}
+#hudLabel b{color:var(--teal)}
+#pips{position:fixed;left:0;right:0;bottom:16px;display:flex;gap:8px;justify-content:center;z-index:20}
+.pip{width:34px;height:4px;border-radius:2px;background:var(--line);transition:background .2s}
+.pip.on{background:var(--teal)}
+
+/* ---------- setup ---------- */
+#setup{position:fixed;inset:0;background:rgba(8,11,18,.96);display:grid;place-items:center;padding:20px;z-index:40;overflow:auto}
+#setup.hidden{display:none}
+.panel{width:min(680px,94vw);background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:26px}
+h1{font-size:clamp(28px,5vw,42px);margin:.1em 0 .25em;letter-spacing:-.02em}
+h1 em{font-style:normal;color:var(--teal)}
+p{color:#B7C3DC;font-size:14.5px;line-height:1.6}
+label{display:block;font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint);margin:14px 0 6px}
+input,select{width:100%;background:#0B0F18;border:1px solid var(--line);border-radius:10px;padding:11px 13px;
+  color:var(--ink);font-family:var(--m);font-size:13px}
+input:focus,select:focus{outline:none;border-color:var(--teal)}
+.row{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px;align-items:center}
+.btn{font-family:var(--s);font-weight:600;font-size:15px;border:0;border-radius:10px;padding:12px 22px;
+  background:var(--teal);color:#06120F;cursor:pointer}
+.btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+.btn:disabled{opacity:.45}
+.note{font-size:12.5px;color:var(--dim);background:#0E1420;border:1px solid var(--line);border-radius:10px;
+  padding:11px 13px;margin-top:12px;line-height:1.55}
+.note.bad{color:#FFC9C9;border-color:rgba(255,107,107,.4);background:rgba(255,107,107,.07);
+  font-family:var(--m);white-space:pre-wrap;font-size:12px}
+kbd{font-family:var(--m);font-size:11px;border:1px solid var(--line);border-radius:5px;padding:1px 6px;color:var(--dim)}
+#say{position:fixed;left:16px;bottom:16px;width:min(420px,50vw);z-index:25;display:flex;gap:8px}
+#say input{flex:1}
+#say button{border:0;border-radius:10px;padding:0 16px;background:var(--panel2);color:var(--ink);cursor:pointer;font-family:var(--s)}
+</style>
+</head>
+<body>
+
+<div id="bar">
+  <span class="dot" id="dotMic"></span>
+  <span id="barTitle">Copilot Desk</span>
+  <button id="bListen">Listen</button>
+  <button id="bEnd">End &amp; summarise</button>
+  <span id="barMeta"></span>
+</div>
+
+<div id="deck">
+  <section class="card live" data-card="live">
+    <div class="grid2">
+      <div>
+        <h2>Live</h2>
+        <div class="big" id="liveTitle">Not listening</div>
+        <div id="transcript"><div class="empty">Transcript appears here. Open your palm to start listening.</div></div>
+        <h3>Flagged moments</h3>
+        <div id="flags"><div class="empty">Pinch to flag the last 20 seconds.</div></div>
+      </div>
+      <div>
+        <h3>Decisions</h3><div id="decisions"><div class="empty">Nothing decided yet.</div></div>
+        <h3>Action items</h3><div id="actions"><div class="empty">No commitments yet.</div></div>
+        <h3>Open questions</h3><div id="questions"><div class="empty">None raised.</div></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card" data-card="catch">
+    <h2>Catch</h2>
+    <div class="big" id="catchTitle">Say it, forget it</div>
+    <p style="max-width:60ch">Speak a stray thought while you work. It decides whether that was a task, a note, an idea, or a question — and if it's a question, it goes and answers it in the background.</p>
+    <h3>Caught today</h3>
+    <div id="caught"><div class="empty">Nothing caught yet.</div></div>
+  </section>
+
+  <section class="card" data-card="brief">
+    <h2>Brief</h2>
+    <div class="big" id="clock">--:--</div>
+    <div id="briefBody"></div>
+    <h3>Session</h3>
+    <div id="briefStats"></div>
+  </section>
+</div>
+
+<div id="pips"></div>
+<div id="nudge"></div>
+
+<div id="say">
+  <input id="sayInput" placeholder="…or type an utterance and press Enter" autocomplete="off">
+  <button id="sayGo">Send</button>
+</div>
+
+<div id="hud">
+  <div id="hudCam">
+    <video id="cam" playsinline muted></video>
+    <canvas id="hudDraw"></canvas>
+  </div>
+  <div id="hudLabel">gestures off</div>
+</div>
+
+<div id="setup">
+  <div class="panel">
+    <div style="font-family:var(--m);font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--teal)">Hands busy, screen across the room</div>
+    <h1>COPILOT <em>DESK</em></h1>
+    <p>It listens to your meeting, pulls out decisions and the things <em>you</em> just promised to do, and catches stray thoughts while you work. Steer it with your hand so nobody on the call sees you clicking.</p>
+
+    <label for="provider">Provider</label>
+    <select id="provider">
+      <option value="openai" selected>OpenAI</option>
+      <option value="nvidia">NVIDIA</option>
+      <option value="custom">Other (Ollama, vLLM, OpenRouter…)</option>
+    </select>
+    <label for="key">API key</label>
+    <input id="key" type="password" placeholder="sk-…" autocomplete="off" spellcheck="false">
+    <label for="base">Base URL</label>
+    <input id="base" value="https://api.openai.com/v1" spellcheck="false">
+    <label for="model">Model</label>
+    <input id="model" value="gpt-4o-mini" spellcheck="false">
+    <div class="note" id="provHint" style="margin-top:10px"></div>
+
+    <div class="row">
+      <button class="btn" id="bGo">Start</button>
+      <button class="btn ghost" id="bProxy">Use local proxy</button>
+      <button class="btn ghost" id="bTest">Test key</button>
+      <button class="btn ghost" id="bNoCam">Start without camera</button>
+    </div>
+    <div class="note">
+      <b>Gestures</b> — open palm: start/stop listening · swipe left/right: change card ·
+      pinch: flag this moment · fist: dismiss.<br>
+      <b>Keys</b> — <kbd>←</kbd><kbd>→</kbd> cards · <kbd>Space</kbd> listen · <kbd>F</kbd> flag · <kbd>Esc</kbd> settings.<br>
+      Audio is transcribed by your browser and never uploaded. Only short text excerpts go to the LLM.
+    </div>
+    <div class="note bad" id="setupErr" style="display:none"></div>
+  </div>
+</div>
+
+<script type="module">
+/* ==========================================================================
+   COPILOT DESK
+   Hands = navigation (coarse, reliable). Voice = content (precise).
+   Cards are config; the engine owns gestures, speech, memory and the model.
+   ========================================================================== */
+const TASKS = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+const HAND_MODEL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
+
+const CFG = {
+  SWIPE_SPEED: 1.05,        // screen widths per second
+  SWIPE_COOLDOWN: 900,
+  HOLD_MS: 900,             // palm/fist must be held this long
+  PINCH_RATIO: 0.42,
+  EXTRACT_EVERY_MS: 40000,  // how often the model re-reads the new transcript
+  EXTRACT_MIN_WORDS: 45,    // ...and the minimum new material worth sending
+  NUDGE_GAP_MS: 180000,     // never nag more than once every 3 minutes
+  FLAG_WINDOW_MS: 20000,
+  MAX_SEGMENTS: 400,
+};
+
+const $ = id => document.getElementById(id);
+const clamp = (v,a,b) => Math.max(a, Math.min(b,v));
+const now = () => performance.now();
+const fmtClock = d => d.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
+const mmss = ms => `${Math.floor(ms/60000)}:${String(Math.floor(ms/1000)%60).padStart(2,'0')}`;
+
+/* ---------- state ---------- */
+const S = {
+  ready:false, cardIdx:0, cards:['live','catch','brief'],
+  key:'', base:'', model:'',
+  listening:false, sessionStart:0, segments:[], interim:'',
+  lastExtractAt:0, extracting:false, wordsSinceExtract:0,
+  decisions:[], actions:[], questions:[], flags:[], caught:[],
+  lastNudgeAt:-1e9, gesture:'—', gestureAction:'', camOn:false, hands:0,
+  llmCalls:0, llmErrors:0, lastError:null, weather:null
+};
+
+/* ---------- storage (survives a reload, degrades to memory) ---------- */
+const store = {
+  get(k, d){ try { const v = localStorage.getItem('copilot:'+k); return v ? JSON.parse(v) : d; } catch(e){ return d; } },
+  set(k, v){ try { localStorage.setItem('copilot:'+k, JSON.stringify(v)); } catch(e){} }
+};
+
+/* ==========================================================================
+   GESTURES — four of them, each with a dwell or a velocity gate
+   ========================================================================== */
+const dist = (a,b) => Math.hypot(a.x-b.x, a.y-b.y);
+
+// one hand's landmarks -> a coarse shape, in normalised image space
+function classifyHand(lm){
+  if (!lm || lm.length < 21) return null;
+  const palm = Math.max(dist(lm[0], lm[9]), 1e-4);
+  const extended = ([tip,pip]) => dist(lm[0], lm[tip]) > dist(lm[0], lm[pip])*1.12;
+  const up = [[8,6],[12,10],[16,14],[20,18]].filter(extended).length;
+  const others = [[12,10],[16,14],[20,18]].filter(extended).length;
+  const thumbOut = dist(lm[4], lm[17])/palm > dist(lm[3], lm[17])/palm;
+  // In a closed fist the thumb also sits beside the index tip, so proximity alone
+  // cannot tell pinch from fist. A real pinch keeps the other fingers extended.
+  const pinch = dist(lm[4], lm[8])/palm < CFG.PINCH_RATIO && others >= 2;
+  return {
+    x: 1 - lm[0].x, y: lm[0].y, palm,          // mirrored so it reads like a mirror
+    fingers: up, pinch,
+    open: up >= 3 && !pinch,
+    fist: up === 0 && !thumbOut,
+    shape: pinch ? 'pinch' : (up >= 3 ? 'open palm' : up === 0 ? 'fist' : 'partial')
+  };
+}
+
+// shape stream -> discrete events
+const gest = {
+  prevX:null, prevT:0, lastSwipe:-1e9, holdShape:null, holdSince:0, holdFired:false, lastPinch:-1e9,
+  reset(){ this.prevX = null; this.holdShape = null; this.holdFired = false; },
+  update(h, t){
+    if (!h){ this.reset(); return null; }
+    let ev = null;
+
+    // swipe: open palm travelling fast
+    if (this.prevX !== null && h.open){
+      const dt = Math.max((t - this.prevT)/1000, 1/120);
+      const vx = (h.x - this.prevX)/dt;
+      if (Math.abs(vx) > CFG.SWIPE_SPEED && t - this.lastSwipe > CFG.SWIPE_COOLDOWN){
+        this.lastSwipe = t; this.holdSince = t; this.holdFired = true;   // a swipe is not a hold
+        ev = vx > 0 ? 'next' : 'prev';
+      }
+    }
+    this.prevX = h.x; this.prevT = t;
+
+    // holds: palm = listen toggle, fist = dismiss
+    if (h.shape !== this.holdShape){ this.holdShape = h.shape; this.holdSince = t; this.holdFired = false; }
+    else if (!this.holdFired && t - this.holdSince > CFG.HOLD_MS){
+      if (h.shape === 'open palm' && t - this.lastSwipe > CFG.SWIPE_COOLDOWN){ this.holdFired = true; ev = ev || 'wake'; }
+      if (h.shape === 'fist'){ this.holdFired = true; ev = ev || 'dismiss'; }
+    }
+
+    // pinch: a quick tap, not a hold
+    if (h.pinch && t - this.lastPinch > 1200){ this.lastPinch = t; ev = ev || 'capture'; }
+    return ev;
+  }
+};
+
+/* ---------- hand tracker ---------- */
+const video = $('cam'), hudCv = $('hudDraw'), hudCtx = hudCv.getContext('2d');
+let tracker = null, busy = false, lastTs = -1, lastVid = -1;
+
+async function startCamera(){
+  const stream = await navigator.mediaDevices.getUserMedia({ video:{ width:{ideal:640}, height:{ideal:480}, facingMode:'user' } });
+  video.srcObject = stream; await video.play();
+  const mod = await import(TASKS);
+  const fs = await mod.FilesetResolver.forVisionTasks(TASKS + "/wasm");
+  const opts = d => ({ baseOptions:{ modelAssetPath:HAND_MODEL, delegate:d }, runningMode:'VIDEO', numHands:1 });
+  try { tracker = await mod.HandLandmarker.createFromOptions(fs, opts('GPU')); }
+  catch(e){ tracker = await mod.HandLandmarker.createFromOptions(fs, opts('CPU')); }
+  S.camOn = true;
+}
+
+const HAND_EDGES = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],
+                    [9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
+function drawHand(lm){
+  hudCv.width = hudCv.clientWidth; hudCv.height = hudCv.clientHeight;
+  if (!lm) return;
+  const P = i => [lm[i].x*hudCv.width, lm[i].y*hudCv.height];
+  hudCtx.strokeStyle = 'rgba(77,214,193,.9)'; hudCtx.lineWidth = 2;
+  hudCtx.beginPath();
+  for (const [a,b] of HAND_EDGES){ hudCtx.moveTo(...P(a)); hudCtx.lineTo(...P(b)); }
+  hudCtx.stroke();
+  hudCtx.fillStyle = '#F5B942';
+  for (const i of [4,8]){ const [x,y] = P(i); hudCtx.beginPath(); hudCtx.arc(x,y,3.5,0,7); hudCtx.fill(); }
+}
+
+function pollHands(){
+  if (!tracker || busy || !video.videoWidth || video.currentTime === lastVid) return;
+  lastVid = video.currentTime; busy = true;
+  try {
+    const ts = Math.max(lastTs+1, now()); lastTs = ts;
+    const res = tracker.detectForVideo(video, ts);
+    const lm = res?.landmarks?.[0];
+    S.hands = lm ? 1 : 0;
+    drawHand(lm);
+    const h = classifyHand(lm);
+    S.gesture = h ? h.shape : '—';
+    const ev = gest.update(h, ts);
+    if (ev) handleGesture(ev);
+  } catch(e){ console.error('[hands]', e); }
+  finally { busy = false; }
+}
+setInterval(pollHands, 40);
+
+/* ==========================================================================
+   LLM CLIENT (OpenAI-compatible, streaming off — we want whole JSON)
+   ========================================================================== */
+class LLMError extends Error { constructor(m,k){ super(m); this.kind = k; } }
+
+/* Providers speak the same dialect with different accents. */
+const PROVIDERS = {
+  openai: { label:'OpenAI', base:'https://api.openai.com/v1', model:'gpt-4o-mini',
+            jsonMode:true, thinkingFlag:false, cors:true,
+            hint:'OpenAI allows browser calls directly — no proxy needed.' },
+  nvidia: { label:'NVIDIA', base:'https://integrate.api.nvidia.com/v1', model:'nvidia/nemotron-3-ultra-550b-a55b',
+            jsonMode:false, thinkingFlag:true, cors:false,
+            hint:'NVIDIA sends no CORS headers — run proxy.py and switch the Base URL.' },
+  custom: { label:'Other (OpenAI-compatible)', base:'http://localhost:11434/v1', model:'llama3.1',
+            jsonMode:false, thinkingFlag:false, cors:true,
+            hint:'Anything OpenAI-compatible: Ollama, vLLM, LM Studio, OpenRouter, Together.' }
+};
+// learned at runtime from 400s, so an unfamiliar model heals itself after one call
+S.provider = 'openai';
+S.quirks = { tokenKey:'max_tokens', sendTemp:true, sendThinking:null, sendJson:null };
+
+function buildBody({ messages, maxTokens, temperature, json }){
+  const P = PROVIDERS[S.provider] || PROVIDERS.custom;
+  const b = { model:S.model, messages, stream:false, top_p:0.9 };
+  b[S.quirks.tokenKey] = maxTokens;
+  if (S.quirks.sendTemp) b.temperature = temperature;
+  const thinking = S.quirks.sendThinking ?? P.thinkingFlag;
+  if (thinking) b.chat_template_kwargs = { enable_thinking:false };
+  const wantJson = S.quirks.sendJson ?? P.jsonMode;
+  if (json && wantJson) b.response_format = { type:'json_object' };
+  return b;
+}
+
+// read a 400 and work out which argument the server hated
+function healQuirk(msg){
+  const m = (msg || '').toLowerCase();
+  if (/max_tokens/.test(m) && /max_completion_tokens|not supported|unsupported/.test(m)){
+    S.quirks.tokenKey = 'max_completion_tokens'; return 'max_tokens -> max_completion_tokens';
+  }
+  if (/temperature/.test(m) && /unsupported|not support|does not support|only the default/.test(m)){
+    S.quirks.sendTemp = false; return 'dropped temperature';
+  }
+  if (/chat_template_kwargs/.test(m)){ S.quirks.sendThinking = false; return 'dropped chat_template_kwargs'; }
+  if (/response_format/.test(m)){ S.quirks.sendJson = false; return 'dropped response_format'; }
+  return null;
+}
+
+async function llm({ messages, maxTokens = 700, temperature = 0.3, json = false, _retry = 0 }){
+  if (!S.key) throw new LLMError('No API key set.', 'key');
+  S.llmCalls++;
+  let res;
+  try {
+    res = await fetch(S.base.replace(/\/+$/,'') + '/chat/completions', {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer ' + S.key },
+      body: JSON.stringify(buildBody({ messages, maxTokens, temperature, json }))
+    });
+  } catch(e){
+    S.llmErrors++;
+    const P = PROVIDERS[S.provider] || PROVIDERS.custom;
+    throw new LLMError('Could not reach ' + S.base + '.\n' +
+      (P.cors ? 'Check the URL and your connection.'
+              : 'This is CORS — run proxy.py and switch the Base URL to http://localhost:8787/v1'), 'network');
+  }
+  if (!res.ok){
+    const body = await res.text().catch(()=> '');
+    if (res.status === 400 && _retry < 3){
+      const fixed = healQuirk(body);
+      if (fixed){ console.info('[llm] adapting request:', fixed); return llm({ messages, maxTokens, temperature, json, _retry:_retry+1 }); }
+    }
+    S.llmErrors++;
+    throw new LLMError(`HTTP ${res.status}\n${body.slice(0,300)}`,
+                       res.status === 401 || res.status === 403 ? 'key' : res.status === 404 ? 'model' : 'http');
+  }
+  const j = await res.json();
+  return (j.choices?.[0]?.message?.content || '').trim();
+}
+
+// models wrap JSON in prose and fences; dig it out rather than trusting them
+function looseJSON(text){
+  if (!text) return null;
+  let t = text.replace(/```(?:json)?/gi, '').trim();
+  const first = Math.min(...['{','['].map(c => { const i = t.indexOf(c); return i < 0 ? Infinity : i; }));
+  if (!isFinite(first)) return null;
+  const open = t[first], close = open === '{' ? '}' : ']';
+  let depth = 0, end = -1, inStr = false, esc = false;
+  for (let i = first; i < t.length; i++){
+    const c = t[i];
+    if (inStr){ if (esc) esc = false; else if (c === '\\') esc = true; else if (c === '"') inStr = false; continue; }
+    if (c === '"') inStr = true;
+    else if (c === open) depth++;
+    else if (c === close){ depth--; if (!depth){ end = i; break; } }
+  }
+  if (end < 0) return null;
+  try { return JSON.parse(t.slice(first, end+1)); } catch(e){ return null; }
+}
+
+/* ==========================================================================
+   SPEECH — the browser's own recogniser, nothing uploaded
+   ========================================================================== */
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec = null, wantListening = false;
+
+function initSpeech(){
+  if (!SR) return false;
+  rec = new SR();
+  rec.continuous = true; rec.interimResults = true; rec.lang = 'en-US';
+  rec.onresult = e => {
+    let interim = '';
+    for (let i = e.resultIndex; i < e.results.length; i++){
+      const r = e.results[i];
+      if (r.isFinal) addSegment(r[0].transcript.trim());
+      else interim += r[0].transcript;
+    }
+    S.interim = interim;
+    renderTranscript();
+  };
+  rec.onerror = e => {
+    console.warn('[speech]', e.error);
+    if (e.error === 'not-allowed'){ wantListening = false; setListening(false); S.lastError = 'Microphone permission denied.'; }
+  };
+  rec.onend = () => { if (wantListening){ try { rec.start(); } catch(e){} } };   // Chrome stops on its own
+  return true;
+}
+
+function addSegment(text){
+  if (!text) return;
+  const seg = { t: now(), at: S.sessionStart ? now() - S.sessionStart : 0, text };
+  S.segments.push(seg);
+  if (S.segments.length > CFG.MAX_SEGMENTS) S.segments.shift();
+  S.wordsSinceExtract += text.split(/\s+/).length;
+  renderTranscript();
+  if (S.cardIdx === 1) catchThought(text);        // on the Catch card, every utterance is a capture
+  return seg;
+}
+
+function setListening(on){
+  S.listening = on;
+  if (on && !S.sessionStart) S.sessionStart = now();
+  wantListening = on;
+  try { on ? rec?.start() : rec?.stop(); } catch(e){}
+  $('dotMic').className = 'dot' + (on ? ' rec' : '');
+  $('bListen').setAttribute('aria-pressed', String(on));
+  $('bListen').textContent = on ? 'Listening' : 'Listen';
+  $('liveTitle').textContent = on ? 'Listening…' : (S.segments.length ? 'Paused' : 'Not listening');
+}
+
+/* ==========================================================================
+   EXTRACTION — the part that makes it a copilot and not a dictaphone
+   ========================================================================== */
+const EXTRACT_SYSTEM =
+`You are a meeting copilot. You will be given a rolling transcript excerpt from one participant's microphone. It is noisy, partial, and may mis-hear words.
+Pull out only what is genuinely there. Reply with JSON only, no prose:
+{"decisions":["..."],"actions":[{"who":"me|them|<name>","text":"..."}],"questions":["..."]}
+Rules:
+- A decision is something settled, not something discussed. If nothing was settled, return [].
+- An action is a commitment to do something. Use "me" when the speaker committed themselves ("I'll", "I can take that", "leave it with me").
+- A question is something raised and left unanswered.
+- Be terse: each entry under 14 words, in the speaker's own terms.
+- Never invent. Empty arrays are the correct answer most of the time.`;
+
+const normText = s => (s||'').toLowerCase().replace(/[^a-z0-9 ]/g,'').replace(/\s+/g,' ').trim();
+function similar(a, b){
+  const A = new Set(normText(a).split(' ').filter(w => w.length > 3));
+  const B = new Set(normText(b).split(' ').filter(w => w.length > 3));
+  if (!A.size || !B.size) return normText(a) === normText(b) ? 1 : 0;
+  let hit = 0; for (const w of A) if (B.has(w)) hit++;
+  return hit / Math.min(A.size, B.size);
+}
+function mergeItems(list, incoming, make){
+  let added = [];
+  for (const raw of incoming || []){
+    const item = make(raw);
+    if (!item || !item.text || item.text.length < 3) continue;
+    if (list.some(x => similar(x.text, item.text) > 0.6)) continue;    // already have it
+    list.push(item); added.push(item);
+  }
+  return added;
+}
+
+function recentTranscript(ms = 180000){
+  const cutoff = now() - ms;
+  return S.segments.filter(s => s.t >= cutoff).map(s => s.text).join(' ');
+}
+
+async function extract(force = false){
+  if (S.extracting || !S.key) return;
+  if (!force && S.wordsSinceExtract < CFG.EXTRACT_MIN_WORDS) return;
+  const text = recentTranscript();
+  if (text.split(/\s+/).length < 12) return;
+  S.extracting = true; S.lastExtractAt = now(); S.wordsSinceExtract = 0;
+  try {
+    const out = await llm({ maxTokens: 600, json: true, messages: [
+      { role:'system', content: EXTRACT_SYSTEM },
+      { role:'user', content: `Transcript excerpt:\n"""${text}"""\n\nAlready captured, do not repeat:\n` +
+        `decisions: ${S.decisions.map(d=>d.text).join(' | ') || '(none)'}\n` +
+        `actions: ${S.actions.map(a=>a.text).join(' | ') || '(none)'}\n` +
+        `questions: ${S.questions.map(q=>q.text).join(' | ') || '(none)'}` }
+    ]});
+    const j = looseJSON(out);
+    if (!j) return;
+    const at = S.sessionStart ? now() - S.sessionStart : 0;
+    mergeItems(S.decisions, j.decisions, t => typeof t === 'string' ? { text:t, at } : null);
+    const mine = mergeItems(S.actions, j.actions, a => {
+      const text = typeof a === 'string' ? a : a?.text;
+      const who = typeof a === 'object' ? (a.who || 'them') : 'them';
+      return text ? { text, who: /^(me|i|myself)$/i.test(who) ? 'me' : who, at } : null;
+    }).filter(a => a.who === 'me');
+    mergeItems(S.questions, j.questions, t => typeof t === 'string' ? { text:t, at } : null);
+    renderLive();
+    if (mine.length) nudge(`You just took this on: ${mine[0].text}`, 'action');
+    checkStallNudge();
+  } catch(e){
+    S.lastError = e.message;
+    if (e.kind === 'key' || e.kind === 'network') showSetupError(e.message);
+    console.error('[extract]', e);
+  } finally { S.extracting = false; }
+}
+
+function checkStallNudge(){
+  if (!S.sessionStart) return;
+  const mins = (now() - S.sessionStart)/60000;
+  if (mins > 22 && !S.decisions.length) nudge(`${Math.round(mins)} minutes in and nothing has been decided yet.`, 'stall');
+}
+
+let nudgeTimer = null;
+function nudge(text, kind = 'info', force = false){
+  if (!force && now() - S.lastNudgeAt < CFG.NUDGE_GAP_MS) return;   // restraint is the feature
+  S.lastNudgeAt = now();
+  const el = $('nudge');
+  el.innerHTML = `${text}<small>${kind} · fist or Esc to dismiss</small>`;
+  el.classList.add('show');
+  clearTimeout(nudgeTimer);
+  nudgeTimer = setTimeout(() => el.classList.remove('show'), 14000);
+}
+const dismissNudge = () => $('nudge').classList.remove('show');
+
+/* ---------- flag the last N seconds ---------- */
+function flagMoment(){
+  const cutoff = now() - CFG.FLAG_WINDOW_MS;
+  const text = S.segments.filter(s => s.t >= cutoff).map(s => s.text).join(' ').slice(-260);
+  S.flags.push({ at: S.sessionStart ? now() - S.sessionStart : 0, text: text || '(nothing said in the last 20s)' });
+  renderLive();
+  nudge('Flagged.', 'flag', true);
+}
+
+/* ==========================================================================
+   CATCH — routes a stray thought, and answers it if it was a question
+   ========================================================================== */
+const CATCH_SYSTEM =
+`You sort stray spoken thoughts. Reply with JSON only:
+{"kind":"task|note|idea|question","title":"under 8 words","text":"cleaned up version of what they said"}
+"task" = something to do. "question" = something they want to know. "idea" = a possibility worth keeping. "note" = a fact to remember.`;
+
+async function catchThought(text){
+  if (!text || text.split(/\s+/).length < 2) return;
+  const item = { id: Math.random().toString(36).slice(2), kind:'note', title: text.slice(0,60), text,
+                 at: Date.now(), answer:null, pending: !!S.key };
+  S.caught.unshift(item);
+  renderCatch();
+  if (!S.key) return;
+  try {
+    const out = await llm({ maxTokens: 220, temperature: 0.2, json: true, messages:[
+      { role:'system', content: CATCH_SYSTEM }, { role:'user', content: text } ]});
+    const j = looseJSON(out) || {};
+    item.kind = ['task','note','idea','question'].includes(j.kind) ? j.kind : 'note';
+    item.title = (j.title || item.title).slice(0, 80);
+    item.text = j.text || item.text;
+    item.pending = item.kind === 'question';
+    renderCatch();
+    if (item.kind === 'question') item.job = answerInBackground(item);
+    else { item.pending = false; persistCaught(); renderCatch(); }
+  } catch(e){
+    item.pending = false; S.lastError = e.message; renderCatch();
+  }
+}
+
+async function answerInBackground(item){
+  try {
+    const out = await llm({ maxTokens: 500, temperature: 0.4, messages:[
+      { role:'system', content:'Answer briefly and concretely in under 90 words. If the answer depends on current data you cannot see, say so in one line and give the best general answer.' },
+      { role:'user', content: item.text } ]});
+    item.answer = out; item.pending = false;
+    persistCaught(); renderCatch();
+    nudge(`Answer ready: ${item.title}`, 'research');
+  } catch(e){ item.pending = false; item.answer = 'Could not answer: ' + e.message; renderCatch(); }
+}
+function persistCaught(){ store.set('caught', S.caught.slice(0, 80)); }
+
+/* ==========================================================================
+   WEATHER — a real API, no key, for the glance card
+   ========================================================================== */
+const WX = { 0:'clear', 1:'mostly clear', 2:'partly cloudy', 3:'overcast', 45:'fog', 48:'freezing fog',
+  51:'light drizzle', 53:'drizzle', 55:'heavy drizzle', 61:'light rain', 63:'rain', 65:'heavy rain',
+  71:'light snow', 73:'snow', 75:'heavy snow', 80:'showers', 81:'showers', 82:'violent showers',
+  95:'thunderstorm', 96:'thunderstorm with hail', 99:'thunderstorm with hail' };
+
+function parseWeather(j){
+  const c = j?.current;
+  if (!c) return null;
+  return { temp: Math.round(c.temperature_2m), code: c.weather_code,
+           text: WX[c.weather_code] ?? 'unknown', wind: Math.round(c.wind_speed_10m) };
+}
+async function loadWeather(){
+  try {
+    const pos = await new Promise((res, rej) =>
+      navigator.geolocation.getCurrentPosition(res, rej, { timeout:8000, maximumAge:900000 }));
+    const { latitude:lat, longitude:lon } = pos.coords;
+    const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(3)}&longitude=${lon.toFixed(3)}&current=temperature_2m,weather_code,wind_speed_10m`);
+    S.weather = parseWeather(await r.json());
+  } catch(e){ S.weather = null; console.info('[weather] unavailable', e.message); }
+  renderBrief();
+}
+
+/* ==========================================================================
+   RENDERING
+   ========================================================================== */
+const esc = s => (s||'').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+function fill(el, items, render, emptyMsg){
+  el.innerHTML = items.length ? items.map(render).join('') : `<div class="empty">${emptyMsg}</div>`;
+}
+
+function renderTranscript(){
+  const el = $('transcript');
+  if (!S.segments.length && !S.interim){
+    el.innerHTML = '<div class="empty">Transcript appears here. Open your palm to start listening.</div>';
+    return;
+  }
+  const recent = S.segments.slice(-60);
+  el.innerHTML = recent.map(s => `<div class="seg"><b>${mmss(s.at)}</b>${esc(s.text)}</div>`).join('')
+    + (S.interim ? `<div class="seg interim">${esc(S.interim)}</div>` : '');
+  el.scrollTop = 1e9;
+}
+
+function renderLive(){
+  fill($('decisions'), S.decisions,
+    d => `<div class="item decision">${esc(d.text)}<small>${mmss(d.at)}</small></div>`, 'Nothing decided yet.');
+  fill($('actions'), S.actions,
+    a => `<div class="item action ${a.who === 'me' ? 'mine' : ''}">${esc(a.text)}<small>${a.who === 'me' ? 'YOU' : esc(a.who).toUpperCase()} · ${mmss(a.at)}</small></div>`,
+    'No commitments yet.');
+  fill($('questions'), S.questions,
+    q => `<div class="item question">${esc(q.text)}<small>${mmss(q.at)}</small></div>`, 'None raised.');
+  fill($('flags'), S.flags.slice(-4).reverse(),
+    f => `<div class="item flag">${esc(f.text)}<small>flagged at ${mmss(f.at)}</small></div>`,
+    'Pinch to flag the last 20 seconds.');
+}
+
+const KIND_ICON = { task:'✓', note:'▪', idea:'✦', question:'?' };
+function renderCatch(){
+  fill($('caught'), S.caught.slice(0, 30), c => `
+    <div class="item ${c.kind === 'question' ? 'question' : c.kind === 'task' ? 'action' : ''}">
+      <b>${KIND_ICON[c.kind] || '▪'} ${esc(c.title)}</b>
+      ${c.answer ? `<div style="color:#B7C3DC;margin-top:7px;font-size:13.5px">${esc(c.answer)}</div>` : ''}
+      <small>${c.kind.toUpperCase()}${c.pending ? ' · thinking…' : ''} · ${new Date(c.at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</small>
+    </div>`, 'Nothing caught yet.');
+}
+
+function renderBrief(){
+  $('clock').textContent = fmtClock(new Date());
+  const w = S.weather;
+  $('briefBody').innerHTML = `
+    <div class="item">${w ? `${w.temp}°C, ${esc(w.text)} · wind ${w.wind} km/h` : 'Weather unavailable (location off, or offline).'}
+      <small>${new Date().toLocaleDateString([], { weekday:'long', day:'numeric', month:'long' })}</small></div>`;
+  const mine = S.actions.filter(a => a.who === 'me').length;
+  $('briefStats').innerHTML = `
+    <div class="item">${S.sessionStart ? mmss(now() - S.sessionStart) : '0:00'} listening · ${S.segments.length} segments
+      <small>session</small></div>
+    <div class="item">${S.decisions.length} decisions · ${S.actions.length} actions (${mine} yours) · ${S.questions.length} questions
+      <small>extracted</small></div>
+    <div class="item">${S.caught.length} caught · ${S.llmCalls} model calls${S.llmErrors ? ` · ${S.llmErrors} failed` : ''}
+      <small>today</small></div>`;
+}
+
+function renderBar(){
+  const parts = [];
+  if (S.sessionStart) parts.push(mmss(now() - S.sessionStart));
+  parts.push(S.camOn ? `hand: ${S.gesture}` : 'gestures off');
+  if (S.lastError) parts.push('⚠ ' + S.lastError.slice(0, 40));
+  $('barMeta').innerHTML = esc(parts.join(' · '));
+  $('hudLabel').innerHTML = S.camOn
+    ? `<b>${esc(S.gesture)}</b> · ${esc(S.gestureAction || cardHint())}`
+    : 'gestures off';
+}
+const cardHint = () => ['palm: listen · pinch: flag', 'palm: listen · speak to catch', 'swipe to browse'][S.cardIdx];
+
+function setCard(i){
+  S.cardIdx = (i + S.cards.length) % S.cards.length;
+  document.querySelectorAll('.card').forEach((el, n) => el.classList.toggle('live', n === S.cardIdx));
+  [...$('pips').children].forEach((p, n) => p.classList.toggle('on', n === S.cardIdx));
+  $('barTitle').textContent = ['Live — meeting copilot', 'Catch — stray thoughts', 'Brief'][S.cardIdx];
+}
+$('pips').innerHTML = S.cards.map((_,i) => `<div class="pip${i?'':' on'}"></div>`).join('');
+
+/* ---------- gesture -> action ---------- */
+function handleGesture(ev){
+  S.gestureAction = ev;
+  setTimeout(() => { S.gestureAction = ''; }, 1200);
+  if (ev === 'next') setCard(S.cardIdx + 1);
+  else if (ev === 'prev') setCard(S.cardIdx - 1);
+  else if (ev === 'wake') setListening(!S.listening);
+  else if (ev === 'dismiss') dismissNudge();
+  else if (ev === 'capture'){
+    if (S.cardIdx === 0) flagMoment();
+    else if (S.cardIdx === 1 && S.segments.length) catchThought(S.segments[S.segments.length-1].text);
+  }
+}
+
+/* ---------- end of session: summary + markdown export ---------- */
+async function endSession(){
+  setListening(false);
+  await extract(true);
+  let summary = '';
+  if (S.key && S.segments.length){
+    try {
+      summary = await llm({ maxTokens: 500, temperature: 0.3, messages:[
+        { role:'system', content:'Summarise this meeting in 4 bullet points, then one line starting "You owe:" listing what the speaker committed to. Plain text, no markdown headers.' },
+        { role:'user', content: recentTranscript(6*3600*1000).slice(-6000) } ]});
+    } catch(e){ summary = 'Summary unavailable: ' + e.message; }
+  }
+  const md = [
+    `# Session ${new Date().toLocaleString()}`,
+    summary ? `\n${summary}\n` : '',
+    `## Decisions\n${S.decisions.map(d => `- ${d.text} (${mmss(d.at)})`).join('\n') || '- none'}`,
+    `\n## Action items\n${S.actions.map(a => `- [${a.who === 'me' ? 'YOU' : a.who}] ${a.text} (${mmss(a.at)})`).join('\n') || '- none'}`,
+    `\n## Open questions\n${S.questions.map(q => `- ${q.text}`).join('\n') || '- none'}`,
+    `\n## Flagged moments\n${S.flags.map(f => `- ${mmss(f.at)} — ${f.text}`).join('\n') || '- none'}`,
+    `\n## Transcript\n${S.segments.map(s => `${mmss(s.at)} ${s.text}`).join('\n')}`
+  ].join('\n');
+  try {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([md], { type:'text/markdown' }));
+    a.download = `session-${new Date().toISOString().slice(0,16).replace(/[:T]/g,'-')}.md`;
+    a.click();
+  } catch(e){ console.warn('[export]', e); }
+  if (summary) nudge(summary.split('\n').find(l => /you owe/i.test(l)) || 'Session saved.', 'summary', true);
+  store.set('lastSession', { at: Date.now(), decisions:S.decisions, actions:S.actions, questions:S.questions });
+}
+
+/* ==========================================================================
+   WIRING
+   ========================================================================== */
+function showSetupError(msg){
+  const el = $('setupErr');
+  el.style.display = msg ? 'block' : 'none';
+  el.textContent = msg || '';
+}
+function readSetup(){
+  S.provider = $('provider').value;
+  S.key = $('key').value.trim(); S.base = $('base').value.trim(); S.model = $('model').value.trim();
+  S.quirks = { tokenKey:'max_tokens', sendTemp:true, sendThinking:null, sendJson:null };   // relearn per provider
+  store.set('cfg', { provider:S.provider, base:S.base, model:S.model });
+}
+
+function applyProvider(id, { keepFields = false } = {}){
+  const P = PROVIDERS[id] || PROVIDERS.custom;
+  S.provider = id;
+  if (!keepFields){ $('base').value = P.base; $('model').value = P.model; }
+  $('key').placeholder = id === 'openai' ? 'sk-…' : id === 'nvidia' ? 'nvapi-…' : 'key (or anything, for a local server)';
+  $('provHint').textContent = P.hint;
+  $('bProxy').style.display = P.cors ? 'none' : '';
+  return P;
+}
+$('provider').addEventListener('change', e => { applyProvider(e.target.value); showSetupError(''); });
+
+$('bProxy').addEventListener('click', () => {
+  const local = 'http://localhost:8787/v1';
+  const on = $('base').value.trim() === local;
+  $('base').value = on ? (PROVIDERS[S.provider] || PROVIDERS.nvidia).base : local;
+  $('bProxy').textContent = on ? 'Use local proxy' : 'Using proxy ✓';
+  showSetupError(on ? '' : 'Now run  python3 proxy.py  in a second terminal, then press Test key.');
+});
+$('bTest').addEventListener('click', async () => {
+  readSetup(); showSetupError(''); $('bTest').disabled = true; $('bTest').textContent = 'Testing…';
+  try {
+    const out = await llm({ maxTokens: 20, temperature: 0, messages:[{ role:'user', content:'Reply with exactly: READY' }] });
+    $('bTest').textContent = /ready/i.test(out) ? '✓ Key works' : '✓ ' + out.slice(0,24);
+  } catch(e){ showSetupError(e.message); $('bTest').textContent = 'Test key'; }
+  finally { $('bTest').disabled = false; }
+});
+
+async function boot(withCam){
+  readSetup(); showSetupError('');
+  $('bGo').disabled = true; $('bGo').textContent = 'Starting…';
+  try {
+    if (withCam) await startCamera();
+    const speechOK = initSpeech();
+    $('setup').classList.add('hidden');
+    S.ready = true;
+    if (!speechOK) nudge('This browser has no speech recognition — use Chrome, or type utterances in the box at the bottom left.', 'setup', true);
+    loadWeather();
+    S.caught = store.get('caught', []); renderCatch();
+    renderLive(); renderBrief(); renderTranscript();
+  } catch(e){
+    showSetupError(e.name === 'NotAllowedError' ? 'Camera permission refused — you can start without the camera.' : (e.message || String(e)));
+  } finally { $('bGo').disabled = false; $('bGo').textContent = 'Start'; }
+}
+$('bGo').addEventListener('click', () => boot(true));
+$('bNoCam').addEventListener('click', () => boot(false));
+$('bListen').addEventListener('click', () => setListening(!S.listening));
+$('bEnd').addEventListener('click', endSession);
+
+$('sayGo').addEventListener('click', sendTyped);
+$('sayInput').addEventListener('keydown', e => { if (e.key === 'Enter') sendTyped(); });
+function sendTyped(){
+  const v = $('sayInput').value.trim(); if (!v) return;
+  $('sayInput').value = '';
+  if (!S.sessionStart) S.sessionStart = now();
+  addSegment(v);
+}
+
+addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.key === 'ArrowRight') setCard(S.cardIdx+1);
+  if (e.key === 'ArrowLeft') setCard(S.cardIdx-1);
+  if (e.key === ' '){ e.preventDefault(); setListening(!S.listening); }
+  if (e.key === 'f') flagMoment();
+  if (e.key === 'Escape'){ dismissNudge(); if (!S.listening) $('setup').classList.toggle('hidden'); }
+});
+
+/* ---------- heartbeat ---------- */
+setInterval(() => {
+  renderBar();
+  if (S.cardIdx === 2) renderBrief();
+  if (S.listening && now() - S.lastExtractAt > CFG.EXTRACT_EVERY_MS) extract();
+}, 1000);
+
+const saved = store.get('cfg', null);
+if (saved?.provider && PROVIDERS[saved.provider]) $('provider').value = saved.provider;
+applyProvider($('provider').value);
+if (saved){ $('base').value = saved.base || $('base').value; $('model').value = saved.model || $('model').value; }
+setCard(0); renderBar();
+console.info('[copilot desk] ready');
+</script>
+</body>
+</html>
