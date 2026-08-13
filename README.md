@@ -34,6 +34,17 @@ Your key lives in the tab's memory only — it is never stored, logged or commit
 
 Endpoints that don't send CORS headers (NVIDIA NIM, Anthropic, most self-hosted servers without CORS configured) cannot be called from a web page at all; pick one of the above or enable CORS on your own server.
 
+### "The browser could not reach …"
+
+All four providers above do allow browser calls, so if the request dies before it gets there the cause is usually local. In rough order of likelihood:
+
+1. **An ad/tracker or privacy blocker** (uBlock Origin, Brave Shields, Little Snitch, some corporate AV) silently cancelling the request — allow this page and retry.
+2. **A VPN or company network** that blocks AI endpoints.
+3. **A typo in the Base URL** — it must include the version path, e.g. `https://api.openai.com/v1`, not `https://api.openai.com`.
+
+The page probes the host when a request fails and tells you which of these it looks like. A wrong or expired key looks different — you'll get a clean `HTTP 401` instead.
+
+
 ## Running locally
 
 Cameras require a secure context, so a plain `file://` double-click won't work — every demo detects that and falls back to keyboard mode. Serve the folder instead:

@@ -452,7 +452,39 @@ const PROVIDERS = {
 };
 
 
+/* A failed fetch() tells the page almost nothing — the browser hides the reason
+   from script for security. So probe: if a no-cors request reaches the host, the
+   server is up and the block was CORS; if even that fails, it is the network,
+   an extension, or the URL. Guessing "it must be CORS" sends people down the
+   wrong path when the real cause is an ad blocker or an offline laptop. */
+async function explainNetworkFailure(base, err){
+  let host = base;
+  try { host = new URL(base).origin; } catch {}
+  const detail = err?.message ? `\n\n(${err.message})` : '';
+
+  if (navigator.onLine === false)
+    return `You appear to be offline, so ${host} is unreachable.\nReconnect and try again, or press “Play without AI”.${detail}`;
+
+  let reachable = false;
+  try {
+    await fetch(host, { mode:'no-cors', cache:'no-store' });
+    reachable = true;                       // opaque response still proves it resolved
+  } catch { /* still unreachable */ }
+
+  if (reachable)
+    return `${host} is reachable, but the browser blocked the response.\n\n` +
+           `That is CORS: the endpoint did not allow this page to read it.\n` +
+           `OpenRouter, Groq, Gemini and OpenAI all do allow it — if you are on one of\n` +
+           `those, check the Base URL is exactly right (it must end in the version path).${detail}`;
+
+  return `The browser could not reach ${host} at all.\n\n` +
+         `Most often that is an ad/tracker blocker or a privacy extension killing the\n` +
+         `request, a VPN or company network blocking AI endpoints, or simply a typo in\n` +
+         `the Base URL. Try disabling blockers for this page, or press “Play without AI”.${detail}`;
+}
+
 async function callLLM({ messages, maxTokens = 220, temperature = 0.9, onDelta, signal }){
+
   if (!A.key) throw new LLMError('No API key set.', 'key');
   let res;
   try {
@@ -467,14 +499,9 @@ async function callLLM({ messages, maxTokens = 220, temperature = 0.9, onDelta, 
 
   } catch(e){
     if (e.name === 'AbortError') throw e;
-    throw new LLMError(
-      'The browser could not reach ' + A.base + '.\n\n' +
-      'Usually this means the endpoint does not allow browser (CORS) requests —\n' +
-      'NVIDIA NIM and Anthropic are common examples.\n' +
-      'Pick OpenRouter, Groq, Gemini or OpenAI above: those work directly from a page.\n' +
-      'Otherwise check the URL, your network, and that the key is still valid.', 'network');
-
+    throw new LLMError(await explainNetworkFailure(A.base, e), 'network');
   }
+
   if (!res.ok){
     const body = await res.text().catch(()=> '');
     const kind = res.status === 401 || res.status === 403 ? 'key' : res.status === 404 ? 'model' : 'http';
