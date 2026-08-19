@@ -1,0 +1,1101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Fit Studio — five exercise games, one camera</title>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --sky:#0A1230; --deep:#141B4A; --ink:#FFF6EA; --dim:#A8B0E0;
+  --sun:#FFC93C; --pink:#FF63A5; --mint:#63FFC9;
+  --f:'Fredoka',system-ui,-apple-system,sans-serif;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--sky);color:var(--ink);
+  font-family:var(--f);user-select:none}
+canvas#stage{position:fixed;inset:0;width:100%;height:100%;display:block}
+video#cam{position:fixed;top:0;left:0;width:2px;height:2px;opacity:0;pointer-events:none}
+
+#top{position:fixed;top:calc(10px + env(safe-area-inset-top));left:10px;right:10px;display:flex;gap:8px;
+  justify-content:space-between;z-index:12;pointer-events:none}
+#top button{font-family:var(--f);font-weight:600;font-size:16px;border:0;border-radius:999px;padding:9px 15px;
+  background:rgba(20,27,74,.82);color:var(--ink);cursor:pointer;backdrop-filter:blur(8px);pointer-events:auto}
+#top .hidden{display:none}
+
+.overlay{position:fixed;inset:0;display:grid;place-items:center;z-index:14;padding:18px;
+  background:rgba(10,18,48,.55);overflow-y:auto}
+.overlay.hidden{display:none}
+.overlay .wrap{width:min(760px,96vw);text-align:center;margin:auto}
+.overlay h1{font-size:clamp(30px,6.5vw,50px);margin:.2em 0 .5em}
+.overlay h1 em{font-style:normal;color:var(--sun)}
+.tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.tile{border:3px solid #2C3684;border-radius:26px;background:rgba(20,27,74,.94);color:var(--ink);
+  font-family:var(--f);font-weight:600;font-size:15px;padding:16px 8px 12px;cursor:pointer;
+  display:grid;gap:5px;place-items:center;transition:transform .12s ease}
+.tile .e{font-size:42px;line-height:1}
+.tile small{font-weight:500;font-size:11.5px;color:var(--dim);line-height:1.3}
+.tile:hover{transform:translateY(-4px);border-color:var(--sun)}
+.tile:active{transform:scale(.95)}
+@media (max-width:600px){ .tiles{grid-template-columns:repeat(2,1fr)} .tile .e{font-size:34px} }
+
+#screens,#over{position:fixed;inset:0;display:grid;place-items:center;padding:18px;z-index:20}
+#screens.hidden,#over.hidden{display:none}
+#over{z-index:22}
+.card{width:min(560px,94vw);background:rgba(20,27,74,.94);border:3px solid #2C3684;border-radius:34px;
+  padding:28px;text-align:center;backdrop-filter:blur(14px)}
+.card.hidden{display:none}
+h1{font-size:clamp(38px,9vw,64px);line-height:.92;margin:.1em 0 .2em}
+h1 em{font-style:normal;color:var(--sun)}
+p{color:#D9DEFF;font-size:16px;line-height:1.55;margin:8px 0;white-space:pre-line}
+.big{font-size:22px;padding:18px 34px;border:0;border-radius:999px;background:var(--sun);color:#0B1030;
+  font-family:var(--f);font-weight:700;cursor:pointer;margin-top:14px;box-shadow:0 10px 0 #C8930F}
+.big:active{transform:translateY(5px);box-shadow:0 5px 0 #C8930F}
+.alt{background:transparent;color:var(--ink);border:3px solid #2C3684;box-shadow:none;font-size:16px;padding:12px 22px}
+.alt:active{transform:none}
+.tip{font-size:13px;color:var(--dim);margin-top:14px}
+#loading{position:fixed;inset:0;display:grid;place-items:center;background:rgba(10,18,48,.92);z-index:30;
+  font-size:22px;color:var(--mint)}
+#loading.hidden{display:none}
+</style>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<video id="cam" playsinline muted></video>
+
+<div id="top">
+  <button id="bHome" class="hidden">🏠 Studio</button>
+  <button id="bSound" aria-pressed="true">🔊</button>
+</div>
+
+<div id="menu" class="overlay hidden">
+  <div class="wrap">
+    <h1>FIT <em>STUDIO</em></h1>
+    <div class="tiles" id="menuTiles"></div>
+    <p class="tip">Press Esc any time to come back here. Stand back so your whole body is in frame.</p>
+  </div>
+</div>
+
+<div id="submenu" class="overlay hidden">
+  <div class="wrap">
+    <h1 id="smT"></h1>
+    <div class="tiles" id="smTiles"></div>
+    <p class="tip"><button class="big alt" id="bSmBack">← Back</button></p>
+  </div>
+</div>
+
+<div id="over" class="hidden">
+  <div class="card">
+    <h1 id="ovT" style="font-size:36px">Done!</h1>
+    <p id="ovB"></p>
+    <button class="big" id="bAgain">Go again</button><br>
+    <button class="big alt" id="bMenu2">Back to studio</button>
+  </div>
+</div>
+
+<div id="loading" class="hidden">Warming up…</div>
+
+<div id="screens">
+  <div class="card" id="cStart">
+    <h1>FIT <em>STUDIO</em></h1>
+    <p>Five exercise games played with your whole body — count reps, box, balance, run and sweat through a HIIT circuit. Your camera is the coach.</p>
+    <button class="big" id="bGo">Turn on camera</button>
+    <p class="tip">🔒 Nothing is recorded or uploaded. Everything happens on this device.</p>
+  </div>
+  <div class="card hidden" id="cErr">
+    <h1 style="font-size:34px" id="errT">No camera</h1>
+    <p id="errB"></p>
+    <button class="big" id="bRetry">Try again</button>
+  </div>
+</div>
+
+<script type="module">
+/* ==========================================================================
+   FIT STUDIO — five MediaPipe Pose exercise games in one file.
+   Rep Coach · Shadow Boxer · Flex & Hold · Cardio Runner · HIIT Circuit.
+   Nothing leaves the device.
+   ========================================================================== */
+const TASKS = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+const POSE_MODEL = "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task";
+const FONT = "'Fredoka',system-ui,sans-serif";
+
+const $ = id => document.getElementById(id);
+const canvas = $('stage'), ctx = canvas.getContext('2d');
+const video = $('cam');
+const clamp = (v,a,b) => Math.max(a, Math.min(b, v));
+const lerp = (a,b,t) => a + (b-a)*t;
+const rnd = (a,b) => a + Math.random()*(b-a);
+const pick = arr => arr[Math.floor(Math.random()*arr.length)];
+const TAU = Math.PI*2;
+const deg = r => r*180/Math.PI;
+
+const stage = { x:0, y:0, w:0, h:0 };
+function layout(){
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  canvas.width = Math.round(innerWidth*dpr); canvas.height = Math.round(innerHeight*dpr);
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  let w = innerWidth, h = w/(16/9);
+  if (h > innerHeight){ h = innerHeight; w = h*(16/9); }
+  stage.w=w; stage.h=h; stage.x=(innerWidth-w)/2; stage.y=(innerHeight-h)/2;
+}
+addEventListener('resize', layout);
+addEventListener('orientationchange', () => setTimeout(layout, 150));
+layout();
+
+const A = { mode:'idle', screen:'start', g:null, over:false, count:0, sound:true, t:0, body:null, shake:0 };
+
+/* ---------- audio ---------- */
+let AC = null;
+const audio = {
+  ready(){
+    try {
+      if (AC === false) return null;
+      if (!AC) AC = new (window.AudioContext || window.webkitAudioContext)();
+      if (AC.state === 'suspended') AC.resume();
+      return AC;
+    } catch(e){ AC = false; return null; }
+  },
+  blip(freq, dur = .18, type = 'triangle', gain = .12){
+    if (!A.sound) return;
+    const ac = this.ready(); if (!ac) return;
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = type; o.frequency.value = freq;
+    g.gain.setValueAtTime(gain, ac.currentTime);
+    g.gain.exponentialRampToValueAtTime(.0001, ac.currentTime + dur);
+    o.connect(g).connect(ac.destination); o.start(); o.stop(ac.currentTime + dur + .02);
+  },
+  rep(n = 0){ this.blip(520 + Math.min(n,24)*22, .14, 'triangle', .14); },
+  pop(){ this.blip(rnd(600,1100), .12, 'triangle', .12); },
+  buzz(){ this.blip(120, .4, 'sawtooth', .14); this.blip(90, .5, 'square', .08); },
+  tick(){ this.blip(880, .07, 'sine', .1); },
+  win(){ this.blip(660,.18,'triangle',.12); setTimeout(()=>this.blip(880,.2,'triangle',.12),140);
+         setTimeout(()=>this.blip(1100,.34,'triangle',.12),300); },
+};
+
+/* ---------- pose ---------- */
+let poseLm = null;
+async function loadPose(){
+  const m = await import(TASKS);
+  const fs = await m.FilesetResolver.forVisionTasks(TASKS + "/wasm");
+  const opts = d => ({ baseOptions:{ modelAssetPath: POSE_MODEL, delegate:d },
+                       runningMode:'VIDEO', numPoses:1,
+                       minPoseDetectionConfidence:.4, minPosePresenceConfidence:.4, minTrackingConfidence:.4 });
+  try { poseLm = await m.PoseLandmarker.createFromOptions(fs, opts('GPU')); }
+  catch(e){ console.warn('[pose] GPU failed, CPU fallback', e);
+            poseLm = await m.PoseLandmarker.createFromOptions(fs, opts('CPU')); }
+}
+
+const IDX = { nose:0, earL:7, earR:8, shL:11, shR:12, elL:13, elR:14, wrL:15, wrR:16,
+              idxL:19, idxR:20, hipL:23, hipR:24, knL:25, knR:26, anL:27, anR:28, toeL:31, toeR:32 };
+const smoothState = {};
+function smoothPt(key, p, a = 0.5){
+  const s = smoothState[key];
+  if (!s || Math.hypot(s.x-p.x, s.y-p.y) > stage.w*0.4){ smoothState[key] = { x:p.x, y:p.y }; return { ...p }; }
+  s.x = lerp(s.x, p.x, a); s.y = lerp(s.y, p.y, a);
+  return { x:s.x, y:s.y, v:p.v };
+}
+function bodyFromLandmarks(lm){
+  const b = {};
+  for (const [k,i] of Object.entries(IDX)){
+    const p = lm[i];
+    b[k] = smoothPt(k, { x: stage.x + (1-p.x)*stage.w, y: stage.y + p.y*stage.h, v: p.visibility ?? 1 });
+  }
+  b.neck = { x:(b.shL.x+b.shR.x)/2, y:(b.shL.y+b.shR.y)/2 };
+  b.pelvis = { x:(b.hipL.x+b.hipR.x)/2, y:(b.hipL.y+b.hipR.y)/2 };
+  b.sw = Math.max(Math.hypot(b.shL.x-b.shR.x, b.shL.y-b.shR.y), stage.w*0.035);
+  b.torso = Math.max(Math.hypot(b.neck.x-b.pelvis.x, b.neck.y-b.pelvis.y), b.sw*0.6);
+  b.headR = Math.max(Math.hypot(b.earL.x-b.earR.x, b.earL.y-b.earR.y)*0.75, b.sw*0.34);
+  b.headC = { x:(b.earL.x+b.earR.x)/2, y: lerp(b.nose.y, (b.earL.y+b.earR.y)/2, .55) };
+  b.tilt = deg(Math.atan2(b.neck.x - b.pelvis.x, -(b.neck.y - b.pelvis.y))); // 0 = upright, + = leaning screen-right
+  // hand centres: push past the wrist toward the knuckles so gloves sit on the fist
+  const handPt = (wr, ix) => (ix.v ?? 0) > .3
+    ? { x: wr.x + (ix.x - wr.x)*1.15, y: wr.y + (ix.y - wr.y)*1.15, v: wr.v }
+    : { ...wr };
+  b.handL = handPt(b.wrL, b.idxL);
+  b.handR = handPt(b.wrR, b.idxR);
+  // only require shoulders — boxing/face-on framing often crops the hips
+  b.ok = Math.min(b.shL.v ?? 1, b.shR.v ?? 1) > 0.4;
+  b.fullBody = Math.min(b.hipL.v ?? 1, b.hipR.v ?? 1, b.knL.v ?? 1, b.knR.v ?? 1) > 0.4;
+  return b;
+
+
+}
+function jointAngle(a, b, c){          // interior angle at b, degrees
+  const v1 = Math.atan2(a.y-b.y, a.x-b.x), v2 = Math.atan2(c.y-b.y, c.x-b.x);
+  let d = Math.abs(v1 - v2); if (d > Math.PI) d = TAU - d;
+  return deg(d);
+}
+const kneeL = b => jointAngle(b.hipL, b.knL, b.anL);
+const kneeR = b => jointAngle(b.hipR, b.knR, b.anR);
+const avgKnee = b => (kneeL(b) + kneeR(b))/2;
+
+let busy = false, lastTs = -1, lastVid = -1;
+function infer(){
+  if (A.mode !== 'camera' || busy || !poseLm) return;
+  if (!video.videoWidth || video.currentTime === lastVid) return;
+  lastVid = video.currentTime; busy = true;
+  try {
+    const ts = Math.max(lastTs+1, performance.now()); lastTs = ts;
+    const r = poseLm.detectForVideo(video, ts);
+    const lm = r?.landmarks?.[0];
+    A.body = lm ? bodyFromLandmarks(lm) : null;
+    if (A.body && !A.body.ok) A.body = null;
+  } catch(e){ console.error('[pose]', e); }
+  finally { busy = false; }
+}
+setInterval(infer, 33);
+
+/* ---------- camera ---------- */
+const CAM_ERR = {
+  NotAllowedError:  ["Camera is switched off", "Tap the camera icon in the address bar and choose Allow, then try again."],
+  NotFoundError:    ["No camera found", "These games need a webcam to play."],
+  NotReadableError: ["Camera is busy", "Another app is using it. Close that app and try again."],
+  SecurityError:    ["Needs a web address", "Run: python3 -m http.server 8000 and open localhost:8000"],
+};
+async function startCamera(){
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video:{ width:{ideal:960}, height:{ideal:540}, facingMode:'user' } });
+    video.srcObject = stream; await video.play();
+    $('loading').classList.remove('hidden');
+    try { await loadPose(); } finally { $('loading').classList.add('hidden'); }
+    A.mode = 'camera';
+    $('screens').classList.add('hidden');
+    showMenu();
+  } catch(err){
+    const [t,b] = CAM_ERR[err.name] || ["Something went wrong", err.message || ''];
+    $('errT').textContent = t; $('errB').textContent = b;
+    $('cStart').classList.add('hidden'); $('cErr').classList.remove('hidden');
+    $('screens').classList.remove('hidden');
+    console.error('[camera]', err);
+  }
+}
+
+/* ---------- draw helpers ---------- */
+function drawVideo(alpha = .9){
+  if (A.mode !== 'camera' || !video.videoWidth) return;
+  ctx.save(); ctx.globalAlpha = alpha;
+  ctx.translate(stage.x + stage.w, stage.y); ctx.scale(-1, 1);
+  ctx.drawImage(video, 0, 0, stage.w, stage.h);
+  ctx.restore();
+}
+function txt(s, x, y, size, color = '#FFF6EA', align = 'center'){
+  ctx.save();
+  ctx.font = `700 ${size}px ${FONT}`;
+  ctx.textAlign = align; ctx.textBaseline = 'middle';
+  ctx.lineWidth = Math.max(3, size*0.14); ctx.lineJoin = 'round';
+  ctx.strokeStyle = 'rgba(10,18,48,.85)';
+  ctx.strokeText(s, x, y);
+  ctx.fillStyle = color; ctx.fillText(s, x, y);
+  ctx.restore();
+}
+function emoji(e, x, y, size, rot = 0){
+  ctx.save(); ctx.translate(x, y); ctx.rotate(rot);
+  ctx.font = `${size}px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(e, 0, size*0.06);
+  ctx.restore();
+}
+function msg(s){ txt(s, stage.x + stage.w/2, stage.y + stage.h*0.5, Math.max(20, stage.h*0.045)); }
+function hint(s){ txt(s, stage.x + stage.w/2, stage.y + stage.h*0.95, stage.h*0.03, '#D9DEFF'); }
+function ring(x, y, r, frac, color, width){
+  ctx.save(); ctx.lineCap = 'round';
+  ctx.strokeStyle = 'rgba(10,18,48,.6)'; ctx.lineWidth = width;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.stroke();
+  if (frac > 0){
+    ctx.strokeStyle = color;
+    ctx.beginPath(); ctx.arc(x, y, r, -Math.PI/2, -Math.PI/2 + TAU*clamp(frac,0,1)); ctx.stroke();
+  }
+  ctx.restore();
+}
+function drawSkeleton(b, color, width){
+  ctx.save();
+  ctx.strokeStyle = color; ctx.lineWidth = width ?? Math.max(5, b.sw*0.12); ctx.lineCap = 'round';
+  const seg = (p,q) => { if ((p.v??1)>.3 && (q.v??1)>.3){ ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); ctx.stroke(); } };
+  seg(b.shL,b.shR); seg(b.shL,b.elL); seg(b.elL,b.wrL); seg(b.shR,b.elR); seg(b.elR,b.wrR);
+  seg(b.shL,b.hipL); seg(b.shR,b.hipR); seg(b.hipL,b.hipR);
+  seg(b.hipL,b.knL); seg(b.knL,b.anL); seg(b.hipR,b.knR); seg(b.knR,b.anR);
+  ctx.beginPath(); ctx.arc(b.headC.x, b.headC.y, b.headR, 0, TAU); ctx.stroke();
+  ctx.restore();
+}
+
+/* ---------- boxing glove drawn on the tracked hand ---------- */
+function drawGlove(el, wr, hand, size, main = '#E12E3C', dark = '#8C0F22', light = '#FF6B6B'){
+  // orientation along the forearm (elbow → hand)
+  const a = Math.atan2(hand.y - el.y, hand.x - el.x);
+  ctx.save();
+  ctx.translate(hand.x, hand.y); ctx.rotate(a);
+
+  const r = size;                       // main fist radius
+  const outline = 'rgba(20,6,10,.9)';
+
+  // cuff (band at the wrist end)
+  ctx.beginPath();
+  ctx.roundRect(-r*1.5, -r*0.62, r*0.72, r*1.24, r*0.2);
+  ctx.fillStyle = '#F5F0E6'; ctx.fill();
+  ctx.lineWidth = Math.max(2, r*0.12); ctx.strokeStyle = outline; ctx.stroke();
+
+  // main fist: rounded mitt, slightly egg-shaped toward the knuckles
+  ctx.beginPath();
+  ctx.ellipse(-r*0.1, 0, r*1.05, r*0.92, 0, 0, TAU);
+  const g = ctx.createRadialGradient(-r*0.35, -r*0.35, r*0.15, 0, 0, r*1.15);
+  g.addColorStop(0, light); g.addColorStop(.55, main); g.addColorStop(1, dark);
+  ctx.fillStyle = g; ctx.fill();
+  ctx.lineWidth = Math.max(2, r*0.12); ctx.strokeStyle = outline; ctx.stroke();
+
+  // thumb bump on the inner side
+  ctx.beginPath();
+  ctx.ellipse(-r*0.35, r*0.62, r*0.42, r*0.34, 0.5, 0, TAU);
+  ctx.fillStyle = main; ctx.fill();
+  ctx.strokeStyle = outline; ctx.lineWidth = Math.max(2, r*0.1); ctx.stroke();
+
+  // knuckle seam
+  ctx.beginPath();
+  ctx.arc(-r*0.05, 0, r*0.7, -1.1, 1.1);
+  ctx.strokeStyle = 'rgba(20,6,10,.45)'; ctx.lineWidth = Math.max(1.5, r*0.08); ctx.stroke();
+
+  // shine
+  ctx.beginPath();
+  ctx.ellipse(r*0.18, -r*0.4, r*0.3, r*0.15, -0.5, 0, TAU);
+  ctx.fillStyle = 'rgba(255,255,255,.5)'; ctx.fill();
+
+  ctx.restore();
+}
+
+/* ---------- particles ---------- */
+
+const bits = [];
+function spawnBit(x, y, color, opts = {}){
+  bits.push({ x, y, vx: opts.vx ?? rnd(-90,90), vy: opts.vy ?? rnd(-160,-20),
+              life:1, decay: opts.decay ?? rnd(.8,1.6), color,
+              r: opts.r ?? rnd(3,9), kind: opts.kind || 'spark', spin: rnd(-4,4), a: 0 });
+}
+function confetti(x, y, n = 60){
+  const cols = ['#FFC93C','#FF63A5','#63FFC9','#7FA9FF','#FF8A6B','#B98CFF'];
+  for (let i=0;i<n;i++)
+    spawnBit(x, y, pick(cols), { kind:'confetti', vx:rnd(-420,420), vy:rnd(-620,-120), r:rnd(6,12), decay:rnd(.35,.7) });
+}
+function stepBits(dt){
+  for (const p of bits){
+    p.vy += (p.kind === 'confetti' ? 700 : 240)*dt;
+    p.x += p.vx*dt; p.y += p.vy*dt; p.life -= dt*p.decay; p.a += p.spin*dt;
+  }
+  for (let i=bits.length-1;i>=0;i--) if (bits[i].life <= 0) bits.splice(i,1);
+}
+function drawBits(){
+  for (const p of bits){
+    ctx.save(); ctx.globalAlpha = clamp(p.life,0,1); ctx.translate(p.x,p.y); ctx.rotate(p.a);
+    ctx.fillStyle = p.color;
+    if (p.kind === 'confetti'){ ctx.fillRect(-p.r*0.6, -p.r*0.3, p.r*1.2, p.r*0.6); }
+    else if (p.kind === 'star'){
+      ctx.beginPath();
+      for (let i=0;i<10;i++){ const rr = i%2 ? p.r*0.4 : p.r, t = i*Math.PI/5;
+        i ? ctx.lineTo(Math.cos(t)*rr, Math.sin(t)*rr) : ctx.moveTo(Math.cos(t)*rr, Math.sin(t)*rr); }
+      ctx.closePath(); ctx.fill();
+    } else { ctx.beginPath(); ctx.arc(0,0,p.r*clamp(p.life,0,1),0,TAU); ctx.fill(); }
+    ctx.restore();
+  }
+  ctx.globalAlpha = 1;
+}
+
+/* ==========================================================================
+   EXERCISE LIBRARY — each has detect(b, st, dt) → { rep, good }
+   Shared by Rep Coach and HIIT Circuit.
+   ========================================================================== */
+function hilo(st, v, lo, hi){   // hysteresis: rep on down→up. tracks st.minV.
+  if (st.phase === undefined){ st.phase = 'up'; st.minV = 999; }
+  let rep = false;
+  if (st.phase === 'up' && v < lo){ st.phase = 'down'; st.minV = v; }
+  else if (st.phase === 'down'){
+    st.minV = Math.min(st.minV, v);
+    if (v > hi){ st.phase = 'up'; rep = true; }
+  }
+  return rep;
+}
+const EXERCISES = [
+  { id:'squat', name:'Squats', emoji:'🏋️', tip:'Bend your knees, keep your chest up',
+    detect(b, st){
+      const v = avgKnee(b);
+      st.prog = clamp((160 - v)/60, 0, 1);
+      const rep = hilo(st, v, 112, 152);
+      return { rep, good: rep && st.minV < 100, fbGood:'Great depth! 💪', fbBad:'Try to go a little lower' };
+    }},
+  { id:'jacks', name:'Jumping Jacks', emoji:'🤸', tip:'Arms overhead, feet wide — then back in',
+    detect(b, st){
+      const up = b.wrL.y < b.headC.y && b.wrR.y < b.headC.y;
+      const spread = Math.abs(b.anL.x - b.anR.x);
+      const open = up && spread > b.sw*1.4;
+      const closed = b.wrL.y > b.shL.y && b.wrR.y > b.shR.y && spread < b.sw*1.1;
+      if (st.phase === undefined) st.phase = 'closed';
+      let rep = false;
+      if (st.phase === 'closed' && open) st.phase = 'open';
+      else if (st.phase === 'open' && closed){ st.phase = 'closed'; rep = true; }
+      st.prog = st.phase === 'open' ? 1 : 0;
+      return { rep, good:true, fbGood:'Nice jack! ⭐' };
+    }},
+  { id:'lunge', name:'Lunges', emoji:'🦵', tip:'Step forward and drop the back knee',
+    detect(b, st){
+      const v = Math.min(kneeL(b), kneeR(b));
+      st.prog = clamp((160 - v)/60, 0, 1);
+      const rep = hilo(st, v, 112, 152);
+      return { rep, good: rep && st.minV < 102, fbGood:'Strong lunge! 🔥', fbBad:'Drop that knee lower' };
+    }},
+  { id:'circles', name:'Arm Circles', emoji:'🌀', tip:'Big slow circles with straight arms',
+    detect(b, st, dt){
+      let rep = false;
+      for (const s of ['L','R']){
+        const wr = b['wr'+s], sh = b['sh'+s];
+        const r = Math.hypot(wr.x-sh.x, wr.y-sh.y);
+        const a = Math.atan2(wr.y-sh.y, wr.x-sh.x), k = 'a'+s;
+        if (st[k] !== undefined && r > b.sw*0.65){
+          let d = a - st[k];
+          if (d > Math.PI) d -= TAU; if (d < -Math.PI) d += TAU;
+          st['acc'+s] = (st['acc'+s] || 0) + d;
+          if (Math.abs(st['acc'+s]) > TAU){ st['acc'+s] = 0; rep = true; }
+        }
+        st[k] = a;
+      }
+      st.prog = clamp(Math.max(Math.abs(st.accL||0), Math.abs(st.accR||0))/TAU, 0, 1);
+      return { rep, good:true, fbGood:'Full circle! 🌀' };
+    }},
+  { id:'knees', name:'High Knees', emoji:'🏃', tip:'Drive each knee up above your hips',
+    detect(b, st){
+      let rep = false;
+      const lift = s => b['kn'+s].y < b['hip'+s].y + b.sw*0.1;
+      if (st.side === undefined) st.side = null;
+      if (lift('L') && st.side !== 'L'){ st.side = 'L'; rep = true; }
+      else if (lift('R') && st.side !== 'R'){ st.side = 'R'; rep = true; }
+      st.prog = lift('L') || lift('R') ? 1 : 0;
+      return { rep, good:true, fbGood:'Knees up! ⚡' };
+    }},
+  { id:'bends', name:'Side Bends', emoji:'🙆', tip:'Lean far to one side, then stand tall',
+    detect(b, st){
+      const v = b.tilt;
+      if (st.phase === undefined){ st.phase = 'center'; st.maxT = 0; }
+      let rep = false;
+      if (st.phase === 'center' && Math.abs(v) > 16){ st.phase = 'bent'; st.maxT = Math.abs(v); }
+      else if (st.phase === 'bent'){
+        st.maxT = Math.max(st.maxT, Math.abs(v));
+        if (Math.abs(v) < 6){ st.phase = 'center'; rep = true; }
+      }
+      st.prog = clamp(Math.abs(v)/28, 0, 1);
+      return { rep, good: rep && st.maxT > 24, fbGood:'Deep stretch! 🌈', fbBad:'Lean a little further' };
+    }},
+  { id:'press', name:'Overhead Press', emoji:'💪', tip:'Push both hands from shoulders to the sky',
+    detect(b, st){
+      const up = b.wrL.y < b.headC.y - b.headR && b.wrR.y < b.headC.y - b.headR;
+      const down = b.wrL.y > b.shL.y - b.sw*0.2 && b.wrR.y > b.shR.y - b.sw*0.2;
+      if (st.phase === undefined) st.phase = 'down';
+      let rep = false;
+      if (st.phase === 'down' && up){ st.phase = 'up'; rep = true; }
+      else if (st.phase === 'up' && down) st.phase = 'down';
+      st.prog = st.phase === 'up' ? 1 : 0;
+      return { rep, good:true, fbGood:'Sky push! ☁️' };
+    }},
+];
+
+/* shared round HUD for rep-based play */
+function drawRepHud(g, timeLeft, total){
+  const cx = stage.x + stage.w/2;
+  ring(stage.x + stage.w*0.09, stage.y + stage.h*0.14, stage.h*0.062, timeLeft/total, '#63FFC9', stage.h*0.016);
+  txt(Math.ceil(timeLeft), stage.x + stage.w*0.09, stage.y + stage.h*0.14, stage.h*0.05, '#63FFC9');
+  txt(`${g.reps}`, cx, stage.y + stage.h*0.12, stage.h*0.1, '#FFC93C');
+  txt('REPS', cx, stage.y + stage.h*0.21, stage.h*0.028, '#A8B0E0');
+  if (g.fb && g.fbT > 0) txt(g.fb, cx, stage.y + stage.h*0.3, stage.h*0.04, '#63FFC9');
+}
+
+/* ==========================================================================
+   MODE 1 — REP COACH · pick an exercise, 30 seconds, count & score reps
+   ========================================================================== */
+const repcoach = {
+  id:'repcoach', name:'Rep Coach', emoji:'🏋️', desc:'7 exercises, auto-counted',
+  menu:{ title:'Pick an <em>exercise</em>',
+         items: EXERCISES.map(e => ({ e:e.emoji, n:e.name, sub:e.tip, data:e })) },
+  start(ex){ this.ex = ex; },
+  reset(){
+    this.reps = 0; this.goodReps = 0; this.time = 30; this.st = {};
+    this.fb = ''; this.fbT = 0;
+  },
+  update(dt, t){
+    drawVideo(.88);
+    const b = A.body, ex = this.ex;
+    this.fbT -= dt;
+
+    if (b){
+      drawSkeleton(b, 'rgba(99,255,201,.4)');
+      this.time -= dt;                                   // clock only runs while you're visible
+      const r = ex.detect(b, this.st, dt);
+      if (r.rep && dt > 0){
+        this.reps++; if (r.good) this.goodReps++;
+        audio.rep(this.reps);
+        this.fb = r.good ? (r.fbGood || 'Nice!') : (r.fbBad || 'Nice!');
+        this.fbT = 1.2;
+
+        for (let i=0;i<12;i++) spawnBit(b.neck.x, b.neck.y, r.good ? '#63FFC9' : '#FFC93C', { kind:'star', r:rnd(4,9) });
+      }
+      // live progress arc near the body
+      ring(b.headC.x, b.headC.y - b.headR*2.2, b.headR*0.7, this.st.prog || 0, '#FFC93C', b.headR*0.22);
+    } else msg('Step back so I can see your whole body! 🙆');
+
+    txt(`${this.ex.emoji} ${this.ex.name}`, stage.x + stage.w - 20, stage.y + stage.h*0.08, stage.h*0.038, '#A8B0E0', 'right');
+    drawRepHud(this, Math.max(0,this.time), 30);
+    hint(this.ex.tip);
+
+    if (this.time <= 0 && dt > 0){
+      const form = this.reps ? Math.round(this.goodReps/this.reps*100) : 0;
+      audio.win(); confetti(stage.x + stage.w/2, stage.y + stage.h/2, 80);
+      gameOver(`${this.ex.emoji} ${this.reps} reps!`,
+        `Form score: ${form}%\n${this.reps >= 20 ? 'You are a machine! 🔥' : this.reps >= 10 ? 'Strong work! 💪' : 'Good start — try to beat it!'}`);
+    }
+  }
+};
+
+/* ==========================================================================
+   MODE 2 — SHADOW BOXER · hit the pads, duck and block on command
+   ========================================================================== */
+const boxer = {
+  id:'boxer', name:'Shadow Boxer', emoji:'🥊', desc:'Punch pads, duck, block',
+  reset(){
+    this.time = 60; this.score = 0; this.combo = 0; this.maxCombo = 0;
+    this.prompt = null; this.nextIn = 1.2; this.interval = 3.0;
+    this.prev = {}; this.noseBase = null; this.blockT = 0;
+  },
+  makePrompt(){
+    const types = ['padL','padR','padHL','padHR','duck','block'];
+    const type = pick(types);
+    const P = { type, t:0, ttl: this.interval*0.9, done:false };
+    if (type.startsWith('pad')){
+      P.x = stage.x + stage.w*(type.includes('L') ? 0.24 : 0.76);
+      P.y = stage.y + stage.h*(type.includes('H') ? 0.28 : 0.5);
+      P.r = stage.h*0.085;
+      P.label = type.includes('H') ? 'UPPERCUT!' : 'PUNCH!';
+    } else P.label = type === 'duck' ? 'DUCK! ⬇️' : 'BLOCK! 🙅';
+    this.prompt = P;
+    audio.tick();
+  },
+  update(dt, t){
+    drawVideo(.88);
+    const b = A.body;
+
+    if (b){
+      this.time -= dt;
+      this.interval = Math.max(1.3, 3.0 - (60 - this.time)*0.03);
+
+      // rolling standing-height baseline for the nose (slow — ducks don't drag it down)
+      this.noseBase = this.noseBase == null ? b.nose.y : lerp(this.noseBase, b.nose.y, 0.008);
+
+      // fist speeds (hand centre = wrist pushed toward knuckles)
+      const spd = {};
+      for (const k of ['handL','handR']){
+        const p = b[k], q = this.prev[k];
+        spd[k] = q && dt > 0 ? Math.hypot(p.x-q.x, p.y-q.y)/dt : 0;
+        this.prev[k] = { x:p.x, y:p.y };
+      }
+
+      const ducking = b.nose.y > this.noseBase + b.torso*0.45;
+      const blocking = Math.hypot(b.wrL.x-b.headC.x, b.wrL.y-b.headC.y) < b.headR*2.4 &&
+                       Math.hypot(b.wrR.x-b.headC.x, b.wrR.y-b.headC.y) < b.headR*2.4;
+      this.blockT = blocking ? this.blockT + dt : 0;
+
+      // gloves drawn directly on the detected hands (only when the wrist is visible)
+      if ((b.wrL.v ?? 1) > .3) drawGlove(b.elL, b.wrL, b.handL, b.sw*0.36, '#E12E3C', '#8C0F22', '#FF6B6B');
+      if ((b.wrR.v ?? 1) > .3) drawGlove(b.elR, b.wrR, b.handR, b.sw*0.36, '#2E6BFF', '#123A9E', '#7FA9FF');
+      if ((b.wrL.v ?? 1) <= .3 && (b.wrR.v ?? 1) <= .3)
+        txt('Show me your hands! 🙌', stage.x + stage.w/2, stage.y + stage.h*0.5, stage.h*0.04);
+
+
+
+      const P = this.prompt;
+      if (P && !P.done && dt > 0){
+        P.t += dt;
+        let hit = false;
+        if (P.type.startsWith('pad')){
+          for (const k of ['handL','handR'])
+            if (spd[k] > stage.h*1.2 && Math.hypot(b[k].x-P.x, b[k].y-P.y) < P.r*1.35) hit = true;
+        } else if (P.type === 'duck') hit = ducking;
+
+        else if (P.type === 'block') hit = this.blockT > 0.35;
+
+        if (hit){
+          P.done = true;
+          this.combo++; this.maxCombo = Math.max(this.maxCombo, this.combo);
+          this.score += 10 + this.combo*2;
+          audio.pop();
+          const fx = P.x ?? b.headC.x, fy = P.y ?? b.headC.y;
+          for (let i=0;i<16;i++) spawnBit(fx, fy, '#FFC93C', { kind:'star', vx:rnd(-280,280), vy:rnd(-280,120), r:rnd(4,10) });
+          this.nextIn = 0.45;
+        } else if (P.t > P.ttl){
+          P.done = true; this.combo = 0; audio.buzz(); A.shake = .3;
+          this.nextIn = 0.6;
+        }
+      }
+      if ((!P || P.done)){
+        this.nextIn -= dt;
+        if (this.nextIn <= 0){ this.makePrompt(); }
+      }
+
+      // draw prompt
+      if (P && !P.done){
+        const urg = 1 - P.t/P.ttl;
+        if (P.type.startsWith('pad')){
+          ctx.save();
+          ctx.globalAlpha = .92;
+          emoji('🎯', P.x, P.y, P.r*2*(1 + Math.sin(t*10)*0.05));
+          ring(P.x, P.y, P.r*1.35, urg, '#FF63A5', stage.h*0.012);
+          ctx.restore();
+          txt(P.label, P.x, P.y - P.r*1.9, stage.h*0.04, '#FF63A5');
+        } else {
+          txt(P.label, stage.x + stage.w/2, stage.y + stage.h*0.32, stage.h*0.085, '#FF63A5');
+          ring(stage.x + stage.w/2, stage.y + stage.h*0.45, stage.h*0.05, urg, '#FF63A5', stage.h*0.014);
+        }
+      }
+    } else msg('Step back — gloves up! 🥊');
+
+    ring(stage.x + stage.w*0.09, stage.y + stage.h*0.14, stage.h*0.062, Math.max(0,this.time)/60, '#63FFC9', stage.h*0.016);
+    txt(Math.ceil(Math.max(0,this.time)), stage.x + stage.w*0.09, stage.y + stage.h*0.14, stage.h*0.05, '#63FFC9');
+    txt(`${this.score}`, stage.x + stage.w/2, stage.y + stage.h*0.1, stage.h*0.08, '#FFC93C');
+    if (this.combo > 1) txt(`${this.combo}x combo!`, stage.x + stage.w/2, stage.y + stage.h*0.18, stage.h*0.035, '#FF63A5');
+    hint('Hit the target fast · duck low · hands to your face to block');
+
+    if (this.time <= 0 && dt > 0){
+      audio.win(); confetti(stage.x + stage.w/2, stage.y + stage.h/2, 80);
+      gameOver('🥊 Final bell!', `Score: ${this.score}\nBiggest combo: ${this.maxCombo}x`);
+    }
+  }
+};
+
+/* ==========================================================================
+   MODE 3 — FLEX & HOLD · match the ghost, hold for 10 seconds
+   ========================================================================== */
+const near = (v, target, tol) => clamp(1 - Math.abs(v - target)/tol, 0, 1);
+const POSES = [
+  { id:'tree', name:'Tree', emoji:'🌳', tip:'One foot up, hands together over your head',
+    score(b){
+      const foot = clamp(Math.abs(b.anL.y - b.anR.y)/(b.sw*0.6), 0, 1);
+      const hands = (b.wrL.y < b.headC.y && b.wrR.y < b.headC.y) ? 1 : 0;
+      const close = clamp(1 - Math.abs(b.wrL.x-b.wrR.x)/(b.sw*1.2), 0, 1);
+      const upright = near(Math.abs(b.tilt), 0, 15);
+      return (foot + hands + close + upright)/4;
+    },
+    ghost:{ head:[.5,.08], shL:[.42,.22], shR:[.58,.22], elL:[.36,.12], elR:[.64,.12], wrL:[.47,.03], wrR:[.53,.03],
+            hipL:[.45,.5], hipR:[.55,.5], knL:[.45,.68], knR:[.62,.58], anL:[.45,.88], anR:[.5,.62] } },
+  { id:'warrior', name:'Warrior II', emoji:'⚔️', tip:'Arms out flat like a T, legs wide, front knee bent',
+    score(b){
+      const armL = near(Math.abs(b.wrL.y - b.shL.y), 0, b.sw*0.5) * (Math.abs(b.wrL.x-b.shL.x) > b.sw*0.9 ? 1 : 0);
+      const armR = near(Math.abs(b.wrR.y - b.shR.y), 0, b.sw*0.5) * (Math.abs(b.wrR.x-b.shR.x) > b.sw*0.9 ? 1 : 0);
+      const wide = clamp((Math.abs(b.anL.x-b.anR.x) - b.sw)/(b.sw*0.8), 0, 1);
+      const bent = clamp((165 - Math.min(kneeL(b), kneeR(b)))/45, 0, 1);
+      return (armL + armR + wide + bent)/4;
+    },
+    ghost:{ head:[.5,.1], shL:[.4,.24], shR:[.6,.24], elL:[.25,.24], elR:[.75,.24], wrL:[.1,.24], wrR:[.9,.24],
+            hipL:[.44,.52], hipR:[.56,.52], knL:[.3,.68], knR:[.68,.7], anL:[.28,.88], anR:[.74,.88] } },
+  { id:'chair', name:'Chair', emoji:'🪑', tip:'Sit back in an invisible chair, arms reaching up',
+    score(b){
+      const bent = near(avgKnee(b), 120, 35);
+      const together = clamp(1 - Math.abs(b.anL.x-b.anR.x)/(b.sw*1.4), 0, 1);
+      const arms = (b.wrL.y < b.shL.y && b.wrR.y < b.shR.y) ? 1 : 0;
+      return (bent*2 + together + arms)/4;
+    },
+    ghost:{ head:[.52,.12], shL:[.44,.26], shR:[.6,.26], elL:[.32,.18], elR:[.72,.18], wrL:[.24,.09], wrR:[.8,.09],
+            hipL:[.42,.55], hipR:[.54,.55], knL:[.46,.7], knR:[.58,.7], anL:[.44,.88], anR:[.56,.88] } },
+  { id:'star', name:'Star', emoji:'⭐', tip:'Arms up and out, legs wide — be a star!',
+    score(b){
+      const armL = (b.wrL.y < b.shL.y - b.sw*0.2 && Math.abs(b.wrL.x-b.shL.x) > b.sw*0.6) ? 1 : 0;
+      const armR = (b.wrR.y < b.shR.y - b.sw*0.2 && Math.abs(b.wrR.x-b.shR.x) > b.sw*0.6) ? 1 : 0;
+      const wide = clamp((Math.abs(b.anL.x-b.anR.x) - b.sw)/(b.sw*0.7), 0, 1);
+      const straight = clamp((avgKnee(b) - 140)/25, 0, 1);
+      return (armL + armR + wide + straight)/4;
+    },
+    ghost:{ head:[.5,.08], shL:[.4,.22], shR:[.6,.22], elL:[.28,.14], elR:[.72,.14], wrL:[.18,.05], wrR:[.82,.05],
+            hipL:[.44,.5], hipR:[.56,.5], knL:[.36,.68], knR:[.64,.68], anL:[.3,.88], anR:[.7,.88] } },
+  { id:'tbal', name:'T-Balance', emoji:'✈️', tip:'Tip forward, one leg back, arms out — like a plane',
+    score(b){
+      const lean = clamp((Math.abs(b.tilt) - 12)/25, 0, 1);
+      const foot = clamp(Math.abs(b.anL.y - b.anR.y)/(b.sw*0.9), 0, 1);
+      const armsOut = (Math.abs(b.wrL.x-b.shL.x) > b.sw*0.7 || Math.abs(b.wrR.x-b.shR.x) > b.sw*0.7) ? 1 : 0;
+      return (lean + foot*2 + armsOut)/4;
+    },
+    ghost:{ head:[.16,.28], shL:[.28,.24], shR:[.28,.36], elL:[.24,.12], elR:[.24,.5], wrL:[.21,.03], wrR:[.21,.6],
+            hipL:[.52,.3], hipR:[.52,.36], knL:[.54,.6], knR:[.72,.32], anL:[.54,.88], anR:[.9,.3] } },
+  { id:'flamingo', name:'Flamingo', emoji:'🦩', tip:'Stand tall on one leg, hands on your hips',
+    score(b){
+      const foot = clamp(Math.abs(b.anL.y - b.anR.y)/(b.sw*0.55), 0, 1);
+      const handL = near(Math.hypot(b.wrL.x-b.hipL.x, b.wrL.y-b.hipL.y), 0, b.sw*0.75);
+      const handR = near(Math.hypot(b.wrR.x-b.hipR.x, b.wrR.y-b.hipR.y), 0, b.sw*0.75);
+      const upright = near(Math.abs(b.tilt), 0, 14);
+      return (foot + handL + handR + upright)/4;
+    },
+    ghost:{ head:[.5,.08], shL:[.42,.22], shR:[.58,.22], elL:[.36,.34], elR:[.64,.34], wrL:[.44,.46], wrR:[.56,.46],
+            hipL:[.45,.48], hipR:[.55,.48], knL:[.45,.66], knR:[.58,.6], anL:[.45,.88], anR:[.55,.68] } },
+  { id:'cactus', name:'Cactus', emoji:'🌵', tip:'Elbows out at shoulder height, hands straight up',
+    score(b){
+      const elL = near(Math.abs(b.elL.y - b.shL.y), 0, b.sw*0.45);
+      const elR = near(Math.abs(b.elR.y - b.shR.y), 0, b.sw*0.45);
+      const wrL = b.wrL.y < b.elL.y - b.sw*0.25 ? 1 : 0;
+      const wrR = b.wrR.y < b.elR.y - b.sw*0.25 ? 1 : 0;
+      return (elL + elR + wrL + wrR)/4;
+    },
+    ghost:{ head:[.5,.08], shL:[.4,.22], shR:[.6,.22], elL:[.26,.22], elR:[.74,.22], wrL:[.26,.07], wrR:[.74,.07],
+            hipL:[.45,.5], hipR:[.55,.5], knL:[.44,.7], knR:[.56,.7], anL:[.44,.9], anR:[.56,.9] } },
+];
+function drawGhost(g, x, y, w, h, color){
+  const P = {}; for (const [k,[gx,gy]] of Object.entries(g)) P[k] = { x: x + gx*w, y: y + gy*h };
+  const neck = { x:(P.shL.x+P.shR.x)/2, y:(P.shL.y+P.shR.y)/2 };
+  const pelv = { x:(P.hipL.x+P.hipR.x)/2, y:(P.hipL.y+P.hipR.y)/2 };
+  ctx.save();
+  ctx.strokeStyle = color; ctx.lineWidth = Math.max(4, h*0.03); ctx.lineCap = 'round';
+  const seg = (p,q) => { ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); ctx.stroke(); };
+  seg(P.shL,P.shR); seg(P.shL,P.elL); seg(P.elL,P.wrL); seg(P.shR,P.elR); seg(P.elR,P.wrR);
+  seg(neck,pelv); seg(P.hipL,P.hipR); seg(P.hipL,P.knL); seg(P.knL,P.anL); seg(P.hipR,P.knR); seg(P.knR,P.anR);
+  ctx.beginPath(); ctx.arc(P.head.x, P.head.y, h*0.055, 0, TAU); ctx.stroke();
+  ctx.restore();
+}
+const flex = {
+  id:'flex', name:'Flex & Hold', emoji:'🧘', desc:'7 balance poses to hold',
+  menu:{ title:'Pick a <em>pose</em>',
+         items: POSES.map(p => ({ e:p.emoji, n:p.name, sub:p.tip, data:p })) },
+  start(p){ this.pose = p; },
+  reset(){ this.hold = 0; this.doneT = 0; },
+  update(dt, t){
+    drawVideo(.88);
+    const b = A.body, P = this.pose;
+    const need = 10;
+
+    // ghost panel
+    const gw = stage.w*0.2, gh = stage.h*0.42, gx = stage.x + stage.w*0.03, gy = stage.y + stage.h*0.3;
+    ctx.save(); ctx.fillStyle = 'rgba(10,18,48,.55)';
+    ctx.beginPath(); ctx.roundRect(gx - 12, gy - 12, gw + 24, gh + 24, 20); ctx.fill(); ctx.restore();
+    drawGhost(P.ghost, gx, gy, gw, gh, 'rgba(255,201,60,.9)');
+    txt('Copy me!', gx + gw/2, gy - stage.h*0.045, stage.h*0.03, '#FFC93C');
+
+    let s = 0;
+    if (b){
+      s = P.score(b);
+      const good = s > 0.68;
+      drawSkeleton(b, good ? 'rgba(99,255,201,.55)' : 'rgba(255,255,255,.35)');
+      if (good){
+        this.hold += dt;
+        if (Math.random() < .3) spawnBit(b.headC.x + rnd(-b.sw,b.sw), b.headC.y - b.headR*2, '#63FFC9', { r:rnd(2,5), vy:rnd(-60,-10) });
+      }
+      else this.hold = Math.max(0, this.hold - dt*1.5);
+    } else msg('Step back so I can see your whole body! 🙆');
+
+    // score + hold ring
+    const cx = stage.x + stage.w/2;
+    ring(cx, stage.y + stage.h*0.14, stage.h*0.07, this.hold/need, '#63FFC9', stage.h*0.018);
+    txt(this.hold >= need ? '✓' : Math.ceil(need - this.hold), cx, stage.y + stage.h*0.14, stage.h*0.05, '#63FFC9');
+    txt(`${P.emoji} ${P.name} — match ${Math.round(s*100)}%`, stage.x + stage.w - 20, stage.y + stage.h*0.08, stage.h*0.035, s > .68 ? '#63FFC9' : '#A8B0E0', 'right');
+    hint(P.tip);
+
+    if (this.hold >= need && dt > 0){
+      audio.win(); confetti(cx, stage.y + stage.h/2, 90);
+      gameOver(`${P.emoji} Held it!`, `You held ${P.name} for 10 seconds.\nBeautiful balance! 🧘`);
+    }
+  }
+};
+
+/* ==========================================================================
+   MODE 4 — CARDIO RUNNER · run in place to move, body verbs beat obstacles
+   ========================================================================== */
+const runner = {
+  id:'runner', name:'Cardio Runner', emoji:'⛷️', desc:'Run in place, jump, squat, punch',
+  reset(){
+    this.dist = 0; this.stars = 0; this.hearts = 3;
+    this.obs = []; this.nextAt = stage.w*0.9;
+    this.steps = []; this.side = null; this.prevPelvY = null; this.jumpT = 0;
+    this.prevWr = {}; this.punchT = 0; this.bob = 0;
+  },
+  verbs(b, dt, t){
+    // cadence from alternating knee lifts
+    const lift = s => b['kn'+s].y < b['hip'+s].y + b.sw*0.72;
+    if (lift('L') && this.side !== 'L'){ this.side = 'L'; this.steps.push(t); }
+    else if (lift('R') && this.side !== 'R'){ this.side = 'R'; this.steps.push(t); }
+    while (this.steps.length && t - this.steps[0] > 2) this.steps.shift();
+    const cadence = this.steps.length/2;                       // steps per second
+
+    // jump: pelvis shoots upward
+    if (this.prevPelvY != null && dt > 0){
+      const vy = (b.pelvis.y - this.prevPelvY)/dt;
+      if (vy < -stage.h*0.5) this.jumpT = 0.55;
+    }
+    this.prevPelvY = b.pelvis.y;
+    this.jumpT -= dt;
+
+    // punch: fast wrist
+    for (const k of ['wrL','wrR']){
+      const p = b[k], q = this.prevWr[k];
+      if (q && dt > 0 && Math.hypot(p.x-q.x, p.y-q.y)/dt > stage.h*1.5) this.punchT = 0.4;
+      this.prevWr[k] = { x:p.x, y:p.y };
+    }
+    this.punchT -= dt;
+
+    return {
+      cadence,
+      jump: this.jumpT > 0,
+      squat: avgKnee(b) < 125,
+      punch: this.punchT > 0,
+      handsUp: b.wrL.y < b.headC.y && b.wrR.y < b.headC.y,
+      lean: b.tilt < -14 ? -1 : b.tilt > 14 ? 1 : 0,
+    };
+  },
+  update(dt, t){
+    // scene
+    const sky = ctx.createLinearGradient(0, stage.y, 0, stage.y + stage.h);
+    sky.addColorStop(0, '#12225E'); sky.addColorStop(.75, '#2A3E8C'); sky.addColorStop(1, '#1A2C6E');
+    ctx.fillStyle = sky; ctx.fillRect(stage.x, stage.y, stage.w, stage.h);
+    const groundY = stage.y + stage.h*0.78;
+    ctx.fillStyle = '#0E1840'; ctx.fillRect(stage.x, groundY, stage.w, stage.h*0.22);
+    ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,.25)'; ctx.lineWidth = 3; ctx.setLineDash([26,22]);
+    ctx.lineDashOffset = -(this.dist % 48);
+    ctx.beginPath(); ctx.moveTo(stage.x, groundY + stage.h*0.1); ctx.lineTo(stage.x + stage.w, groundY + stage.h*0.1); ctx.stroke();
+    ctx.restore();
+
+    const b = A.body;
+    let v = { cadence:0, jump:false, squat:false, punch:false, handsUp:false, lean:0 };
+    if (b) v = this.verbs(b, dt, t);
+    else msg('Step back and RUN IN PLACE to move! 🏃');
+
+    const speed = stage.w*(0.02 + v.cadence*0.14);
+    if (dt > 0) this.dist += speed*dt;
+    this.bob += v.cadence*dt*9;
+
+    // spawn obstacles ahead
+    if (this.dist + stage.w > this.nextAt){
+      const type = pick(['jump','squat','punch','star','lean','jump','squat','star']);
+      this.obs.push({ x: this.nextAt + stage.w*0.55, type, dir: pick([-1,1]), done:false });
+      this.nextAt += rnd(stage.w*0.55, stage.w*0.95);
+    }
+
+    // player
+    const px = stage.x + stage.w*0.2;
+    let py = groundY - stage.h*0.045;
+    if (v.jump) py -= stage.h*0.16;
+    if (v.squat) py += stage.h*0.03;
+    py += Math.abs(Math.sin(this.bob))*-stage.h*0.02;
+
+    // obstacles
+    const OBJ = {
+      jump:{ e:'🕳️', label:'JUMP!', y:0.815 }, squat:{ e:'🚧', label:'SQUAT!', y:0.6 },
+      punch:{ e:'🧱', label:'PUNCH!', y:0.72 }, star:{ e:'⭐', label:'HANDS UP!', y:0.46 },
+      lean:{ e:'🌵', label:'', y:0.72 },
+    };
+    for (const o of this.obs){
+      const sx = px + (o.x - this.dist);
+      if (sx < stage.x - 120){ o.gone = true; continue; }
+      if (sx > stage.x + stage.w + 120) continue;
+      const spec = OBJ[o.type];
+      const oy = stage.y + stage.h*spec.y;
+      const label = o.type === 'lean' ? (o.dir < 0 ? 'LEAN ⬅️' : 'LEAN ➡️') : spec.label;
+      emoji(spec.e, sx, oy, stage.h*0.085);
+      if (!o.done) txt(label, sx, oy - stage.h*0.09, stage.h*0.032, '#FFC93C');
+
+      // resolve when it reaches the player
+      if (!o.done && dt > 0 && sx <= px + stage.w*0.015){
+        o.done = true;
+        let ok = false;
+        if (o.type === 'jump') ok = v.jump;
+        else if (o.type === 'squat') ok = v.squat;
+        else if (o.type === 'punch') ok = v.punch;
+        else if (o.type === 'star') ok = v.handsUp;
+        else if (o.type === 'lean') ok = v.lean === o.dir;
+        if (ok){
+          if (o.type === 'star'){ this.stars++; audio.win(); }
+          else audio.pop();
+          for (let i=0;i<14;i++) spawnBit(sx, oy, '#63FFC9', { kind:'star', r:rnd(4,9) });
+        } else {
+          this.hearts--; A.shake = .4; audio.buzz();
+          if (this.hearts <= 0){
+            const m = Math.round(this.dist/(stage.w*0.25));
+            gameOver('😮‍💨 Wiped out!', `You ran ${m} blocks and grabbed ${this.stars} ⭐\nRun faster, react quicker!`);
+          }
+        }
+      }
+    }
+    this.obs = this.obs.filter(o => !o.gone);
+
+    // runner avatar
+    ctx.save();
+    if (v.cadence < 0.4 && !v.jump){ ctx.globalAlpha = .8; }
+    emoji(v.squat ? '🧎' : '🏃', px, py, stage.h*(v.squat ? 0.085 : 0.105));
+    ctx.restore();
+    if (v.punch) emoji('💥', px + stage.w*0.05, py - stage.h*0.02, stage.h*0.07);
+    if (b && v.cadence < 0.4) txt('Run in place! 🏃', px, py - stage.h*0.13, stage.h*0.033, '#FFC93C');
+
+    // HUD
+    txt(`${Math.round(this.dist/(stage.w*0.25))} blocks`, stage.x + stage.w/2, stage.y + stage.h*0.08, stage.h*0.055, '#FFC93C');
+    txt(`⭐ ${this.stars}`, stage.x + stage.w - 20, stage.y + stage.h*0.08, stage.h*0.04, '#FFF6EA', 'right');
+    txt('❤️'.repeat(Math.max(0,this.hearts)), stage.x + 20, stage.y + stage.h*0.08, stage.h*0.04, '#fff', 'left');
+    hint('Run in place to move · JUMP · SQUAT · PUNCH · HANDS UP · LEAN');
+  }
+};
+
+/* ==========================================================================
+   MODE 5 — HIIT CIRCUIT · 8 rounds of 20s work / 10s rest (Tabata)
+   ========================================================================== */
+const hiit = {
+  id:'hiit', name:'HIIT Circuit', emoji:'⏱️', desc:'8 rounds · 20s on / 10s off',
+  reset(){
+    this.plan = [];
+    const shuffled = [...EXERCISES].sort(() => Math.random() - .5);
+    for (let i=0;i<8;i++) this.plan.push(shuffled[i % shuffled.length]);
+    this.round = 0; this.phase = 'rest'; this.time = 5;      // 5s get-ready
+    this.st = {}; this.reps = 0; this.tally = {}; this.total = 0;
+    this.lastBeep = 99;
+  },
+  update(dt, t){
+    drawVideo(.88);
+    const b = A.body;
+    const ex = this.plan[this.round];
+    const cx = stage.x + stage.w/2;
+
+    if (b) drawSkeleton(b, this.phase === 'work' ? 'rgba(255,99,165,.45)' : 'rgba(99,255,201,.4)');
+
+    if (dt > 0 && (b || this.phase === 'rest')){
+      this.time -= dt;
+      // countdown beeps
+      const n = Math.ceil(this.time);
+      if (n <= 3 && n >= 1 && n !== this.lastBeep){ this.lastBeep = n; audio.tick(); }
+
+      if (this.time <= 0){
+        this.lastBeep = 99;
+        if (this.phase === 'rest'){
+          this.phase = 'work'; this.time = 20; this.st = {}; this.reps = 0;
+          audio.blip(880, .3, 'triangle', .14);
+        } else {
+          this.tally[ex.name] = (this.tally[ex.name] || 0) + this.reps;
+          this.total += this.reps;
+          this.round++;
+          if (this.round >= 8){
+            audio.win(); confetti(cx, stage.y + stage.h/2, 110);
+            const lines = Object.entries(this.tally).map(([k,v]) => `${k}: ${v}`).join('\n');
+            gameOver('⏱️ Circuit complete!', `${this.total} total reps\n${lines}`);
+            return;
+          }
+          this.phase = 'rest'; this.time = 10;
+          audio.blip(520, .3, 'sine', .12);
+        }
+      }
+    }
+
+    if (this.phase === 'work'){
+      if (b){
+        const r = ex.detect(b, this.st, dt);
+        if (r.rep && dt > 0){
+          this.reps++; audio.rep(this.reps);
+          for (let i=0;i<10;i++) spawnBit(b.neck.x, b.neck.y, '#FF63A5', { kind:'star', r:rnd(4,8) });
+        }
+      } else msg('Come back — the clock is paused! 🙆');
+      txt(`${ex.emoji} ${ex.name}`, cx, stage.y + stage.h*0.09, stage.h*0.055, '#FF63A5');
+      txt(`${this.reps} reps`, cx, stage.y + stage.h*0.18, stage.h*0.045, '#FFC93C');
+      ring(stage.x + stage.w*0.09, stage.y + stage.h*0.14, stage.h*0.062, this.time/20, '#FF63A5', stage.h*0.016);
+      txt(Math.ceil(this.time), stage.x + stage.w*0.09, stage.y + stage.h*0.14, stage.h*0.05, '#FF63A5');
+      hint(ex.tip);
+    } else {
+      const next = this.plan[this.round];
+      txt('REST 😮‍💨', cx, stage.y + stage.h*0.3, stage.h*0.07, '#63FFC9');
+      txt(`Next: ${next.emoji} ${next.name}`, cx, stage.y + stage.h*0.42, stage.h*0.045);
+      txt(next.tip, cx, stage.y + stage.h*0.5, stage.h*0.03, '#A8B0E0');
+      ring(cx, stage.y + stage.h*0.66, stage.h*0.08, this.time/(this.round === 0 ? 5 : 10), '#63FFC9', stage.h*0.018);
+      txt(Math.ceil(this.time), cx, stage.y + stage.h*0.66, stage.h*0.055, '#63FFC9');
+    }
+    txt(`Round ${Math.min(this.round+1,8)}/8`, stage.x + stage.w - 20, stage.y + stage.h*0.08, stage.h*0.035, '#A8B0E0', 'right');
+  }
+};
+
+/* ==========================================================================
+   FLOW — studio menu, optional submenus, countdowns, game-over card
+   ========================================================================== */
+const MODES = [repcoach, boxer, flex, runner, hiit];
+
+function showMenu(){
+  A.screen = 'menu'; A.g = null; A.over = false;
+  $('menu').classList.remove('hidden');
+  $('submenu').classList.add('hidden');
+  $('over').classList.add('hidden');
+  $('bHome').classList.add('hidden');
+}
+function openMode(m){
+  if (m.menu){
+    A.screen = 'submenu';
+    $('menu').classList.add('hidden');
+    $('smT').innerHTML = m.menu.title;
+    const box = $('smTiles'); box.innerHTML = '';
+    for (const item of m.menu.items){
+      const el = document.createElement('button');
+      el.className = 'tile';
+      el.innerHTML = `<span class="e">${item.e}</span>${item.n}<small>${item.sub}</small>`;
+      el.onclick = () => { m.start(item.data); launch(m); };
+      box.appendChild(el);
+    }
+    $('submenu').classList.remove('hidden');
+  } else launch(m);
+}
+function launch(m){
+  A.g = m; A.screen = 'game'; A.over = false;
+  m.reset(); A.count = 3.6;
+  $('menu').classList.add('hidden');
+  $('submenu').classList.add('hidden');
+  $('over').classList.add('hidden');
+  $('bHome').classList.remove('hidden');
+  audio.pop();
+}
+function gameOver(title, body){
+  if (A.over) return;
+  A.over = true;
+  $('ovT').textContent = title; $('ovB').textContent = body;
+  $('over').classList.remove('hidden');
+}
+
+for (const m of MODES){
+  const el = document.createElement('button');
+  el.className = 'tile';
+  el.innerHTML = `<span class="e">${m.emoji}</span>${m.name}<small>${m.desc}</small>`;
+  el.onclick = () => openMode(m);
+  $('menuTiles').appendChild(el);
+}
+
+/* ---------- main loop ---------- */
+let last = performance.now();
+function loop(now){
+  requestAnimationFrame(loop);
+  const dt = Math.min((now - last)/1000, .05); last = now; A.t += dt;
+
+  ctx.clearRect(0, 0, innerWidth, innerHeight);
+  ctx.fillStyle = '#0A1230'; ctx.fillRect(0, 0, innerWidth, innerHeight);
+
+  ctx.save();
+  if (A.shake > 0){ A.shake -= dt; ctx.translate(rnd(-8,8)*A.shake, rnd(-8,8)*A.shake); }
+
+  if (A.screen === 'menu' || A.screen === 'submenu'){
+    drawVideo(.3);
+  } else if (A.screen === 'game' && A.g){
+    const frozen = A.count > 0 || A.over;
+    A.g.update(frozen ? 0 : dt, A.t);
+    if (A.count > 0){
+      A.count -= dt;
+      const n = Math.ceil(A.count - 0.6);
+      const s = n >= 1 ? String(n) : 'GO!';
+      ctx.save(); ctx.fillStyle = 'rgba(10,18,48,.45)'; ctx.fillRect(stage.x, stage.y, stage.w, stage.h); ctx.restore();
+      txt(s, stage.x + stage.w/2, stage.y + stage.h/2, stage.h*0.22, n >= 1 ? '#FFC93C' : '#63FFC9');
+    }
+  }
+
+  stepBits(dt); drawBits();
+  ctx.restore();
+}
+requestAnimationFrame(loop);
+
+/* ---------- UI wiring ---------- */
+$('bGo').onclick = () => { audio.ready(); startCamera(); };
+$('bRetry').onclick = () => { $('cErr').classList.add('hidden'); $('cStart').classList.remove('hidden'); startCamera(); };
+$('bHome').onclick = showMenu;
+$('bMenu2').onclick = showMenu;
+$('bSmBack').onclick = showMenu;
+$('bAgain').onclick = () => { $('over').classList.add('hidden'); A.over = false; A.g.reset(); A.count = 3.6; };
+$('bSound').onclick = e => {
+  A.sound = !A.sound;
+  e.currentTarget.textContent = A.sound ? '🔊' : '🔇';
+  e.currentTarget.setAttribute('aria-pressed', String(A.sound));
+};
+addEventListener('keydown', e => { if (e.key === 'Escape' && A.mode === 'camera') showMenu(); });
+</script>
+</body>
+</html>
